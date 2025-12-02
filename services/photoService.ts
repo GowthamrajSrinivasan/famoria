@@ -33,17 +33,23 @@ export const photoService = {
       orderBy('createdAt', 'desc')
     );
 
-    return onSnapshot(q, (snapshot) => {
-      const photos = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          // Convert Firestore timestamp to string date for display if needed
-          // or keep the existing date string format from input
-        } as Photo;
-      });
-      callback(photos);
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const photos = snapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            // Convert Firestore timestamp to string date for display if needed
+            // or keep the existing date string format from input
+          } as Photo;
+        });
+        callback(photos);
+      },
+      (error) => {
+        console.error('Feed subscription error:', error);
+      }
+    );
   }
 };

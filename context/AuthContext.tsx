@@ -30,33 +30,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // Fetch or create user document in Firestore
-        const userRef = doc(db, 'users', firebaseUser.uid);
-        const userSnap = await getDoc(userRef);
-        
-        const userData: User = {
-          id: firebaseUser.uid,
-          name: firebaseUser.displayName || 'Family Member',
-          email: firebaseUser.email,
-          avatar: firebaseUser.photoURL || 'https://api.dicebear.com/9.x/avataaars/svg?seed=' + firebaseUser.uid,
-          lastLogin: new Date().toISOString()
-        };
+        try {
+          // Fetch or create user document in Firestore
+          const userRef = doc(db, 'users', firebaseUser.uid);
+          const userSnap = await getDoc(userRef);
 
-        if (!userSnap.exists()) {
-          // Initialize new user with Pro plan defaults
-          await setDoc(userRef, {
-            ...userData,
-            createdAt: new Date().toISOString(),
-            plan: 'Pro',
-            planLimit: 20,
-            editsUsed: 0
-          });
-        } else {
-          // Update last login
-          // We can merge data but let's keep it simple
+          const userData: User = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || 'Family Member',
+            email: firebaseUser.email,
+            avatar: firebaseUser.photoURL || 'https://api.dicebear.com/9.x/avataaars/svg?seed=' + firebaseUser.uid,
+            lastLogin: new Date().toISOString()
+          };
+
+          if (!userSnap.exists()) {
+            // Initialize new user with Pro plan defaults
+            await setDoc(userRef, {
+              ...userData,
+              createdAt: new Date().toISOString(),
+              plan: 'Pro',
+              planLimit: 20,
+              editsUsed: 0
+            });
+          } else {
+            // Update last login
+            // We can merge data but let's keep it simple
+          }
+
+          setUser(userData);
+        } catch (err: any) {
+          console.error('Firestore error:', err);
+          // Still set user with auth data even if Firestore is offline
+          const userData: User = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || 'Family Member',
+            email: firebaseUser.email,
+            avatar: firebaseUser.photoURL || 'https://api.dicebear.com/9.x/avataaars/svg?seed=' + firebaseUser.uid,
+            lastLogin: new Date().toISOString()
+          };
+          setUser(userData);
+          setError('Unable to sync user data. Some features may be limited.');
         }
-
-        setUser(userData);
       } else {
         setUser(null);
       }

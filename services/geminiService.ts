@@ -2,10 +2,10 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { AIAnalysisResult } from "../types";
 
 // Helper to get AI instance lazily.
-// This prevents the app from crashing on startup if process.env.API_KEY is not yet available,
+// This prevents the app from crashing on startup if the API key is not yet available,
 // which fixes the "Container failed to start" error.
 const getAI = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 };
 
 /* ----------------------- SCHEMA ----------------------- */

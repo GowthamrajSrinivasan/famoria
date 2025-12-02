@@ -42,9 +42,9 @@ function ProtectedApp() {
   }, [searchQuery, photos]);
 
   const handleUploadComplete = (newPhoto: Photo) => {
-    // Note: With real-time listener, we don't strictly need to manually update state here
-    // as the listener will catch the new document. 
-    // However, for immediate UI feedback we can close the uploader.
+    // Optimistically add photo to state for immediate UI feedback
+    // The real-time listener will sync it properly
+    setPhotos(prevPhotos => [newPhoto, ...prevPhotos]);
     setView(ViewState.GALLERY);
   };
 
