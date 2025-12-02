@@ -1,0 +1,7 @@
+{
+  "name": "Famoria",
+  "description": "A warm, intelligent family photo sharing application. Auto-generates captions and tags for your cherished memories using Google Gemini.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
