@@ -14,6 +14,38 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
+// Validate required environment variables
+const requiredEnvVars = [
+  'VITE_FIREBASE_API_KEY',
+  'VITE_FIREBASE_AUTH_DOMAIN',
+  'VITE_FIREBASE_PROJECT_ID',
+  'VITE_FIREBASE_STORAGE_BUCKET',
+  'VITE_FIREBASE_MESSAGING_SENDER_ID',
+  'VITE_FIREBASE_APP_ID'
+];
+
+const missingVars = requiredEnvVars.filter(
+  varName => !import.meta.env[varName]
+);
+
+if (missingVars.length > 0) {
+  const errorMsg = `
+🔥 Firebase Configuration Error!
+
+Missing environment variables:
+${missingVars.map(v => `  - ${v}`).join('\n')}
+
+To fix this:
+1. Copy .env.example to .env
+2. Add your Firebase configuration values
+3. Restart the dev server
+
+See DEPLOYMENT_SETUP.md for details.
+  `;
+  console.error(errorMsg);
+  throw new Error('Missing Firebase environment variables. Check the console for details.');
+}
+
 // Debug: Log config to verify env vars are loading
 console.log('Firebase Config:', {
   ...firebaseConfig,
