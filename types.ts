@@ -49,3 +49,15 @@ export interface AIAnalysisResult {
   tags: string[];
   suggestedAlbum: string;
 }
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: 'like' | 'comment' | 'tag' | 'mention';
+  actorName: string;
+  actorAvatar?: string;
+  message: string;
+  photoId?: string;
+  createdAt: number;
+  isRead: boolean;
+}
