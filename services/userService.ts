@@ -1,6 +1,6 @@
 import { db } from '../lib/firebase';
-import { doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
-import { UserUsage } from '../types';
+import { doc, getDoc, setDoc, updateDoc, increment, collection, getDocs } from 'firebase/firestore';
+import { UserUsage, User } from '../types';
 
 const USERS_COLLECTION = 'users';
 const DEFAULT_LIMIT = 20; // Default to Pro limit for now
@@ -36,5 +36,18 @@ export const userService = {
   checkQuota: async (userId: string): Promise<boolean> => {
     const usage = await userService.getUsage(userId);
     return usage.editsUsed < usage.limit;
+  },
+
+  getAllUsers: async (): Promise<User[]> => {
+    try {
+      const usersSnapshot = await getDocs(collection(db, USERS_COLLECTION));
+      return usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as User));
+    } catch (error) {
+      console.error("Error fetching all users", error);
+      return [];
+    }
   }
 };
