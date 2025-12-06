@@ -1,8 +1,10 @@
 export interface Photo {
   id: string;
+  albumId?: string; // Album this photo belongs to
   url: string; // Base64 or URL
+  thumbnailUrl?: string; // Thumbnail URL
   caption: string;
-  tags: string[];
+  tags: string[]; // Tagged user IDs
   date: string;
   author: string;
   authorId?: string;
@@ -10,6 +12,16 @@ export interface Photo {
   commentsCount?: number;
   isAiGenerated?: boolean;
   originalPhotoId?: string; // If this is an edit
+  // Enhanced fields for upload
+  filename?: string;
+  fileSize?: number;
+  fileType?: string;
+  width?: number;
+  height?: number;
+  uploadedAt?: number;
+  aiTags?: string[]; // AI-generated tags
+  analysis?: Record<string, any>; // AI analysis data
+  aiProcessed?: boolean;
 }
 
 export interface User {
@@ -36,12 +48,42 @@ export interface Comment {
   userAvatar: string;
   text: string;
   createdAt: number; // Timestamp
+  mentions?: string[]; // Array of mentioned user IDs
+  voiceNote?: {
+    audioUrl: string;
+    transcription?: string;
+    duration: number;
+  };
 }
 
 export enum ViewState {
   GALLERY = 'GALLERY',
   UPLOAD = 'UPLOAD',
-  ALBUMS = 'ALBUMS'
+  ALBUMS = 'ALBUMS',
+  ALBUM_VIEW = 'ALBUM_VIEW'
+}
+
+export interface Album {
+  id: string;
+  name: string; // Required, max 50 chars
+  description?: string; // Optional, max 500 chars
+  coverPhoto?: string; // URL to cover photo
+  createdBy: string; // User ID
+  createdAt: number; // Timestamp
+  updatedAt: number; // Timestamp
+  privacy: 'private' | 'family' | 'public';
+  members: string[]; // Array of user IDs who can access
+  photoCount?: number; // Cached count
+}
+
+export interface UploadProgress {
+  id: string;
+  file: File;
+  progress: number; // 0-100
+  status: 'pending' | 'uploading' | 'processing' | 'complete' | 'error';
+  error?: string;
+  thumbnailUrl?: string;
+  photoId?: string;
 }
 
 export interface AIAnalysisResult {
