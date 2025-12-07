@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Upload, Edit, Trash2, MoreVertical, Image as ImageIcon } from 'lucide-react';
-import { Album, Photo } from '../types';
+import { Album, Photo, User } from '../types';
 import { PhotoCard } from './PhotoCard';
 
 interface AlbumViewProps {
@@ -11,6 +11,7 @@ interface AlbumViewProps {
     onDelete: () => void;
     onUpload: () => void;
     onPhotoClick: (photo: Photo) => void;
+    onPhotoDelete?: (photoId: string) => void;
 }
 
 export const AlbumView: React.FC<AlbumViewProps> = ({
@@ -20,7 +21,8 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     onEdit,
     onDelete,
     onUpload,
-    onPhotoClick
+    onPhotoClick,
+    onPhotoDelete
 }) => {
     const [photos, setPhotos] = useState<Photo[]>([]);
     const [loading, setLoading] = useState(true);
@@ -150,7 +152,8 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                             key={photo.id}
                             photo={photo}
                             onClick={() => onPhotoClick(photo)}
-                            currentUserId={currentUserId}
+                            currentUser={{ id: currentUserId || '', name: '', email: null, avatar: '' } as User}
+                            onDelete={onPhotoDelete}
                         />
                     ))}
                 </div>

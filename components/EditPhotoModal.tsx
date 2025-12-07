@@ -3,10 +3,11 @@ import { X, Sparkles, Wand2, Check, AlertCircle, RefreshCw } from 'lucide-react'
 import { Photo } from '../types';
 import { editImageWithAI } from '../services/geminiService';
 import { userService } from '../services/userService';
-import { storageService } from '../services/storageService';
+import { securePhotoService } from '../services/securePhotoService';
 import { photoService } from '../services/photoService';
 import { useAuth } from '../context/AuthContext';
 import { Button } from './Button';
+import { useDecryptedPhoto } from '../hooks/useDecryptedPhoto';
 
 interface EditPhotoModalProps {
   photo: Photo;
@@ -32,15 +33,32 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState({ editsUsed: 0, limit: 0, plan: 'Pro' });
 
+  // Decrypt photo if encrypted
+  const { url: decryptedUrl, loading: loadingPhoto } = useDecryptedPhoto(photo.url, photo.id);
+
   useEffect(() => {
     if (user) {
       userService.getUsage(user.id).then(setUsage);
     }
   }, [user]);
 
+  /**
+   * Convert blob URL to base64
+   */
+  const blobUrlToBase64 = async (blobUrl: string): Promise<string> => {
+    const response = await fetch(blobUrl);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   const handleGenerate = async () => {
-    if (!prompt.trim() || !user) return;
-    
+    if (!prompt.trim() || !user || !decryptedUrl) return;
+
     const hasQuota = await userService.checkQuota(user.id);
     if (!hasQuota) {
       setError("You've reached your monthly AI edit limit. Please upgrade your plan.");
@@ -51,7 +69,12 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
     setError(null);
 
     try {
-      const generatedImageBase64 = await editImageWithAI(photo.url, prompt);
+      // Convert decrypted URL to base64 for AI processing
+      const imageBase64 = decryptedUrl.startsWith('blob:')
+        ? await blobUrlToBase64(decryptedUrl)
+        : decryptedUrl;
+
+      const generatedImageBase64 = await editImageWithAI(imageBase64, prompt);
       setResultImage(generatedImageBase64);
     } catch (err) {
       setError("Something went wrong with the AI editor. Please try again.");
@@ -65,23 +88,37 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
     setIsSaving(true);
 
     try {
-      // 1. Upload edited image (Base64) to Firebase Storage
+      // 1. Convert base64 to File object
+      const base64Response = await fetch(resultImage);
+      const blob = await base64Response.blob();
       const fileName = `edited_${Date.now()}.png`;
-      const downloadURL = await storageService.uploadImage(resultImage, `photos/${user.id}/edits/${fileName}`);
+      const file = new File([blob], fileName, { type: 'image/png' });
 
-      // 2. Increment usage
+      // 2. Upload with encryption
+      const result = await securePhotoService.uploadPhoto(file, {
+        albumName: 'AI Edited',
+        onProgress: (progress) => {
+          console.log(`Upload: ${progress.percentage}% - ${progress.status}`);
+        },
+      });
+
+      // 3. Increment usage
       await userService.incrementUsage(user.id);
-      
-      // 3. Save new photo record
+
+      // 4. Save new photo record
       const newPhotoData = {
-        url: downloadURL,
+        photoId: result.photoId,
+        albumId: result.albumId,
+        url: `encrypted://${result.photoId}`, // Encrypted placeholder URL
         caption: `Edited: ${photo.caption}`,
         tags: [...photo.tags, 'AI Edited'],
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         author: user.name,
         authorId: user.id,
         isAiGenerated: true,
-        originalPhotoId: photo.id
+        originalPhotoId: photo.id,
+        uploadedAt: result.uploadedAt,
+        encrypted: true,
       };
 
       const savedPhoto = await photoService.addPhoto(newPhotoData);
@@ -118,7 +155,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
           </div>
 
           <div className="flex-1 flex items-center justify-center p-8 relative">
-            {isGenerating ? (
+            {loadingPhoto || isGenerating ? (
                <div className="flex flex-col items-center gap-4 text-center">
                   <div className="relative">
                     <div className="w-20 h-20 rounded-full border-4 border-stone-800 border-t-orange-500 animate-spin"></div>
@@ -126,14 +163,18 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
                        <Sparkles className="text-orange-400 animate-pulse" size={24} />
                     </div>
                   </div>
-                  <p className="text-stone-300 font-medium animate-pulse">Creating magic...</p>
-                  <p className="text-stone-500 text-sm max-w-xs">This might take a few seconds as we process every pixel.</p>
+                  <p className="text-stone-300 font-medium animate-pulse">
+                    {loadingPhoto ? 'Loading photo...' : 'Creating magic...'}
+                  </p>
+                  {isGenerating && (
+                    <p className="text-stone-500 text-sm max-w-xs">This might take a few seconds as we process every pixel.</p>
+                  )}
                </div>
             ) : resultImage ? (
               <img src={resultImage} alt="Edited Result" className="max-w-full max-h-full object-contain shadow-2xl rounded-lg" />
-            ) : (
-              <img src={photo.url} alt="Original" className="max-w-full max-h-full object-contain opacity-80" />
-            )}
+            ) : decryptedUrl ? (
+              <img src={decryptedUrl} alt="Original" className="max-w-full max-h-full object-contain opacity-80" />
+            ) : null}
           </div>
 
           {/* Compare Toggle (Only if result exists) */}

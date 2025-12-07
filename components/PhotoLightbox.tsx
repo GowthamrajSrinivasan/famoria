@@ -1,19 +1,45 @@
 import React, { useState } from 'react';
-import { X, Calendar, Share2, MoreVertical, Sparkles } from 'lucide-react';
+import { X, Calendar, Share2, MoreVertical, Sparkles, Loader2, Trash2 } from 'lucide-react';
 import { Photo, User } from '../types';
 import { CommentSection } from './CommentSection';
 import { LikeButton } from './LikeButton';
 import { EditPhotoModal } from './EditPhotoModal';
+import { useDecryptedPhoto } from '../hooks/useDecryptedPhoto';
+import { securePhotoService } from '../services/securePhotoService';
 
 interface PhotoLightboxProps {
   photo: Photo;
   currentUser: User | null;
   onClose: () => void;
   onPhotoUpdate?: (photo: Photo) => void; // Optional callback if we want to update the feed immediately
+  onDelete?: (photoId: string) => void;
 }
 
-export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser, onClose, onPhotoUpdate }) => {
+export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser, onClose, onPhotoUpdate, onDelete }) => {
   const [showEditModal, setShowEditModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Decrypt photo if encrypted
+  const { url: decryptedUrl, loading, error } = useDecryptedPhoto(photo.url, photo.id);
+
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this photo? This action cannot be undone.')) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await securePhotoService.deletePhoto(photo.id);
+      if (onDelete) {
+        onDelete(photo.id);
+      }
+      onClose();
+    } catch (error) {
+      console.error('Failed to delete photo:', error);
+      alert('Failed to delete photo. Please try again.');
+      setIsDeleting(false);
+    }
+  };
 
   // Close on Escape key
   React.useEffect(() => {
@@ -62,11 +88,23 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
         
         {/* Image Section - Darker background for focus */}
         <div className="flex-1 bg-black flex items-center justify-center relative group">
-          <img 
-            src={photo.url} 
-            alt={photo.caption} 
-            className="max-w-full max-h-[50vh] md:max-h-full object-contain"
-          />
+          {loading && (
+            <div className="flex items-center justify-center">
+              <Loader2 size={48} className="text-white animate-spin" />
+            </div>
+          )}
+          {error && (
+            <div className="flex items-center justify-center">
+              <p className="text-white text-lg">Failed to load photo</p>
+            </div>
+          )}
+          {!loading && !error && decryptedUrl && (
+            <img
+              src={decryptedUrl}
+              alt={photo.caption}
+              className="max-w-full max-h-[50vh] md:max-h-full object-contain"
+            />
+          )}
         </div>
 
         {/* Sidebar Section */}
@@ -87,8 +125,17 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                     </div>
                  </div>
               </div>
-              <button className="text-stone-400 hover:bg-stone-50 p-2 rounded-full transition-colors">
-                <MoreVertical size={20} />
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Delete photo"
+              >
+                {isDeleting ? (
+                  <Loader2 size={20} className="animate-spin" />
+                ) : (
+                  <Trash2 size={20} />
+                )}
               </button>
             </div>
 

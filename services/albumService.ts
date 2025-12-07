@@ -18,7 +18,7 @@ import { Album } from '../types';
 const ALBUMS_COLLECTION = 'albums';
 
 /**
- * Create a new album
+ * Create a new album (simplified - just a folder for organization)
  */
 export const createAlbum = async (
     name: string,
@@ -35,6 +35,8 @@ export const createAlbum = async (
         throw new Error('Description must be 500 characters or less');
     }
 
+    // Albums are just organizational folders
+    // Photos are encrypted at the photo level, not album level
     const albumData = {
         name: name.trim(),
         description: description?.trim() || '',

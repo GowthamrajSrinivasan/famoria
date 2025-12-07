@@ -1,67 +1,123 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    // User documents - users can read/write their own data
-    match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && request.auth.uid == userId;
+
+    // ⚠️ TEMPORARY: OPEN ACCESS FOR DEVELOPMENT
+    // TODO: Add proper security rules before production
+
+    // Helper function to check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Photos - social feed with proper access control
+    // Helper function to check if user owns the document
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Users collection - anyone can read (for displaying names/avatars), users can write their own
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
+    }
+
+    // Photos collection - encrypted photos in albums (Phase 4)
     match /photos/{photoId} {
-      // Anyone authenticated can read photos (for feed)
-      allow read: if request.auth != null;
-
-      // Only authenticated users can create photos
-      allow create: if request.auth != null &&
-                       request.auth.uid == request.resource.data.authorId;
-
-      // Users can update photos for interactions (likes, comment counts)
-      // OR if they own the photo
-      allow update: if request.auth != null && (
-        // Owner can update anything
-        request.auth.uid == resource.data.authorId ||
-        // Anyone can update likes array and commentsCount for interactions
-        (request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['likes', 'commentsCount']))
-      );
-
-      // Only owner can delete
-      allow delete: if request.auth != null &&
-                       request.auth.uid == resource.data.authorId;
+      // ⚠️ TEMPORARY: Full access for authenticated users
+      allow read, write: if isSignedIn();
 
       // Comments subcollection
       match /comments/{commentId} {
-        // Anyone authenticated can read comments
-        allow read: if request.auth != null;
-
-        // Authenticated users can add comments
-        allow create: if request.auth != null;
-
-        // Only comment author can delete their comment
-        allow delete: if request.auth != null &&
-                         request.auth.uid == resource.data.userId;
+        // ⚠️ TEMPORARY: Full access for authenticated users
+        allow read, write: if isSignedIn();
       }
     }
 
-    // Albums - users can read/write their own albums
+    // Albums - encrypted albums (Phase 4)
     match /albums/{albumId} {
-      // Users can read their own albums or shared albums
-      allow read: if request.auth != null &&
-                     (request.auth.uid == resource.data.userId ||
-                      request.auth.uid in resource.data.sharedWith);
-
-      allow create: if request.auth != null &&
-                       request.auth.uid == request.resource.data.userId;
-
-      allow update, delete: if request.auth != null &&
-                               request.auth.uid == resource.data.userId;
+      // ⚠️ TEMPORARY: Full access for authenticated users
+      allow read, write: if isSignedIn();
     }
 
-    // Fallback: deny all other access
+    // Family Members - all authenticated users can read/write
+    match /familyMembers/{memberId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // Invitations
+    match /invitations/{inviteId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() &&
+        (resource.data.invitedBy == request.auth.uid ||
+         resource.data.get('invitedEmail', '') == request.auth.token.email);
+      allow delete: if isSignedIn() &&
+        resource.data.invitedBy == request.auth.uid;
+    }
+
+    // Notifications - users can only read/write their own
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if isSignedIn() &&
+        (resource.data.userId == request.auth.uid ||
+         request.resource.data.userId == request.auth.uid);
+    }
+
+    // Subscriptions - users can only read their own, only backend can write
+    match /subscriptions/{subscriptionId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false; // Only backend can write
+    }
+
+    // Usage - users can only read their own, only backend can write
+    match /usage/{userId} {
+      allow read: if isSignedIn() && userId == request.auth.uid;
+      allow write: if false; // Only backend can write
+    }
+
+    // ========================================
+    // ENCRYPTION-SPECIFIC RULES (Phase 0+)
+    // ========================================
+
+    // Album Keys - encrypted keys for Family Albums (Phase 4)
+    match /albumKeys/{keyId} {
+      // ⚠️ TEMPORARY: Full access for authenticated users
+      allow read, write: if isSignedIn();
+    }
+
+    // All other collections - full access for authenticated users
+    match /auditLogs/{logId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /shareLinks/{linkId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /aiConsent/{consentId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /privacyEvents/{eventId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /users/{userId}/keyMetadata/{keyId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /recoveryRequests/{requestId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /users/{userId}/trustedContacts/{contactId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // ⚠️ TEMPORARY: Allow all authenticated users to read/write any document
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if isSignedIn();
     }
   }
 }

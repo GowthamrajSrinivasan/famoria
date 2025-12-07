@@ -1,11 +1,13 @@
-import React, { useState, useRef } from 'react';
-import { Upload, X, Image as ImageIcon, Sparkles, Check, Wand2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, X, Image as ImageIcon, Sparkles, Check, Wand2, FolderPlus, Folder } from 'lucide-react';
 import { Button } from './Button';
 import { analyzeImage } from '../services/geminiService';
-import { storageService } from '../services/storageService';
+import { securePhotoService } from '../services/securePhotoService';
 import { photoService } from '../services/photoService';
-import { Photo } from '../types';
+import { Photo, Album } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { subscribeToAlbums } from '../services/albumService';
+import { CreateAlbumModal } from './CreateAlbumModal';
 
 interface UploaderProps {
   onUploadComplete: (photo: Photo) => void;
@@ -47,7 +49,31 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel }
   const [isUploading, setIsUploading] = useState(false);
   const [analysis, setAnalysis] = useState<{ caption: string; tags: string[]; album: string } | null>(null);
   const [validationError, setValidationError] = useState<ValidationError | null>(null);
+  const [albums, setAlbums] = useState<Album[]>([]);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [showCreateAlbumModal, setShowCreateAlbumModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load user's albums
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = subscribeToAlbums(
+      user.id,
+      (updatedAlbums) => {
+        setAlbums(updatedAlbums);
+        // Auto-select first album if none selected
+        if (updatedAlbums.length > 0 && !selectedAlbumId) {
+          setSelectedAlbumId(updatedAlbums[0].id);
+        }
+      },
+      (error) => {
+        console.error('Error loading albums:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
 
   const validateFile = (file: File): ValidationError | null => {
     // Check if it's an image
@@ -152,22 +178,44 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel }
   };
 
   const handleSave = async () => {
-    if (!preview || !analysis || !fileToUpload || !user) return;
+    if (!preview || !analysis || !fileToUpload || !user || !selectedAlbumId) {
+      if (!selectedAlbumId) {
+        setValidationError({
+          title: 'No Album Selected',
+          message: 'Please select an album or create a new one.',
+          suggestion: 'Choose an album from the dropdown or click "Create New Album".'
+        });
+      }
+      return;
+    }
     setIsUploading(true);
 
     try {
-      // 1. Upload to Firebase Storage
-      const fileName = `${Date.now()}_${fileToUpload.name}`;
-      const downloadURL = await storageService.uploadImage(fileToUpload, `photos/${user.id}/${fileName}`);
+      // Find selected album name
+      const selectedAlbum = albums.find(a => a.id === selectedAlbumId);
+
+      // 1. Upload with encryption to Firebase Storage
+      const result = await securePhotoService.uploadPhoto(fileToUpload, {
+        albumId: selectedAlbumId,
+        albumName: selectedAlbum?.name || 'General',
+        onProgress: (progress) => {
+          console.log(`Upload: ${progress.percentage}% - ${progress.status}`);
+          // You can add a progress bar here if needed
+        },
+      });
 
       // 2. Save metadata to Firestore
       const newPhotoData = {
-        url: downloadURL,
+        photoId: result.photoId,
+        albumId: result.albumId,
+        url: `encrypted://${result.photoId}`, // Encrypted placeholder URL
         caption: analysis.caption,
         tags: analysis.tags,
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         author: user.name,
-        authorId: user.id
+        authorId: user.id,
+        uploadedAt: result.uploadedAt,
+        encrypted: true, // Mark as encrypted
       };
 
       const savedPhoto = await photoService.addPhoto(newPhotoData);
@@ -175,17 +223,21 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel }
       // 3. Complete
       onUploadComplete(savedPhoto as Photo);
     } catch (error: any) {
-      console.error("Upload failed", error);
+      console.error("Encrypted upload failed", error);
 
       // Show user-friendly error message
       let errorMessage = "Failed to upload photo. Please try again.";
 
-      if (error?.message?.includes('storage/unauthorized')) {
+      if (error?.message?.includes('storage/unauthorized') || error?.message?.includes('not authenticated')) {
         errorMessage = "You don't have permission to upload photos. Please sign in again.";
       } else if (error?.message?.includes('network')) {
         errorMessage = "Network error. Please check your internet connection and try again.";
       } else if (error?.message?.includes('quota')) {
         errorMessage = "Storage limit reached. Please contact support.";
+      } else if (error?.message?.includes('too large') || error?.message?.includes('FILE_TOO_LARGE')) {
+        errorMessage = "Photo is too large. Maximum size is 50MB.";
+      } else if (error?.message?.includes('format') || error?.message?.includes('INVALID_FORMAT')) {
+        errorMessage = "Unsupported photo format. Please use JPEG, PNG, or HEIC.";
       }
 
       setValidationError({
@@ -329,11 +381,51 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel }
                       </div>
 
                       <div>
-                         <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-2">Album</label>
-                         <div className="inline-flex items-center gap-2 text-stone-600 bg-stone-50 px-4 py-2 rounded-lg border border-stone-200/60">
-                            <ImageIcon size={16} className="text-teal-500" />
-                            <span className="text-sm font-semibold">{analysis.album}</span>
-                         </div>
+                         <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-2">
+                           Select Album
+                         </label>
+                         {albums.length === 0 ? (
+                           <div className="text-center py-6 bg-stone-50 rounded-xl border border-dashed border-stone-200">
+                             <p className="text-sm text-stone-500 mb-3">No albums yet. Create your first album!</p>
+                             <button
+                               onClick={() => setShowCreateAlbumModal(true)}
+                               className="inline-flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium"
+                             >
+                               <FolderPlus size={16} />
+                               Create Album
+                             </button>
+                           </div>
+                         ) : (
+                           <div className="space-y-3">
+                             <div className="relative">
+                               <Folder size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                               <select
+                                 value={selectedAlbumId || ''}
+                                 onChange={(e) => setSelectedAlbumId(e.target.value)}
+                                 className="w-full pl-10 pr-4 py-2.5 bg-white border-2 border-stone-200 rounded-lg text-sm font-medium text-stone-700 focus:border-orange-300 focus:ring-0 transition-colors appearance-none cursor-pointer hover:border-stone-300"
+                               >
+                                 <option value="" disabled>Choose an album...</option>
+                                 {albums.map((album) => (
+                                   <option key={album.id} value={album.id}>
+                                     {album.name} {album.photoCount ? `(${album.photoCount} photos)` : ''}
+                                   </option>
+                                 ))}
+                               </select>
+                               <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                                 <svg className="w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                 </svg>
+                               </div>
+                             </div>
+                             <button
+                               onClick={() => setShowCreateAlbumModal(true)}
+                               className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-stone-50 text-stone-600 rounded-lg hover:bg-stone-100 transition-colors text-sm font-medium border border-stone-200"
+                             >
+                               <FolderPlus size={16} />
+                               Create New Album
+                             </button>
+                           </div>
+                         )}
                       </div>
                     </div>
                   ) : (
@@ -360,6 +452,19 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel }
           </div>
         )}
       </div>
+
+      {/* Create Album Modal */}
+      {user && (
+        <CreateAlbumModal
+          isOpen={showCreateAlbumModal}
+          onClose={() => setShowCreateAlbumModal(false)}
+          onSuccess={(albumId) => {
+            setSelectedAlbumId(albumId);
+            setShowCreateAlbumModal(false);
+          }}
+          currentUserId={user.id}
+        />
+      )}
     </div>
   );
 };

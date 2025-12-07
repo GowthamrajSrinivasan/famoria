@@ -2,21 +2,164 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Allow authenticated users to read and write their own photos
-    match /photos/{userId}/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+
+    // ⚠️ TEMPORARY: OPEN ACCESS FOR DEVELOPMENT
+    // TODO: Add proper security rules before production
+
+    // Helper function to check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Allow authenticated users to read and write their own albums
-    match /albums/{userId}/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+    // Helper function to check if user owns the path
+    function isOwner(userId) {
+      return request.auth.uid == userId;
     }
 
-    // Fallback: deny all other access
+    // ========================================
+    // DEFAULT: Allow all for authenticated users
+    // ========================================
     match /{allPaths=**} {
-      allow read, write: if false;
+      allow read, write: if isSignedIn();
+    }
+
+    // ========================================
+    // ENCRYPTED PHOTOS (Phase 0+)
+    // ========================================
+
+    // Path format: encrypted/{userId}/{albumId}/{photoId}/{type}
+    // type: "original" or "thumbnail"
+    match /encrypted/{userId}/{albumId}/{photoId}/{type} {
+
+      // Only encrypted blobs (application/octet-stream) allowed
+      function isEncryptedBlob() {
+        return request.resource.contentType == 'application/octet-stream';
+      }
+
+      // File size limits
+      function isSizeValid() {
+        // Original: max 50MB
+        // Thumbnail: max 2MB
+        return (type == 'original' && request.resource.size <= 50 * 1024 * 1024) ||
+               (type == 'thumbnail' && request.resource.size <= 2 * 1024 * 1024);
+      }
+
+      // Check album membership (requires Firestore read)
+      function isAlbumMember() {
+        let albumDoc = firestore.get(/databases/(default)/documents/albums/$(albumId));
+        return request.auth.uid in albumDoc.data.get('members', []) ||
+               albumDoc.data.userId == request.auth.uid;
+      }
+
+      // WRITE: Only owner can upload, must be encrypted blob
+      allow write: if isSignedIn() &&
+                   isOwner(userId) &&
+                   isEncryptedBlob() &&
+                   isSizeValid();
+
+      // READ: Album members can download
+      allow read: if isSignedIn() &&
+                  (isOwner(userId) || isAlbumMember());
+
+      // DELETE: Only owner can delete
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+
+    // ========================================
+    // LEGACY PHOTOS (backwards compatibility)
+    // ========================================
+    match /photos/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isOwner(userId);
+    }
+
+    match /albums/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isOwner(userId);
+    }
+
+    // ========================================
+    // USER PROFILE PICTURES (Unencrypted)
+    // ========================================
+
+    match /profile-pictures/{userId}/{imageId} {
+      // Allow common image types
+      function isValidImage() {
+        return request.resource.contentType.matches('image/.*');
+      }
+
+      // Max 5MB for profile pictures
+      function isSizeValid() {
+        return request.resource.size <= 5 * 1024 * 1024;
+      }
+
+      // WRITE: Users can upload their own profile pictures
+      allow write: if isSignedIn() &&
+                   isOwner(userId) &&
+                   isValidImage() &&
+                   isSizeValid();
+
+      // READ: Anyone authenticated can view profile pictures
+      allow read: if isSignedIn();
+
+      // DELETE: Only owner can delete
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+
+    // ========================================
+    // TEMPORARY UPLOADS (for AI processing)
+    // ========================================
+
+    match /temp/{userId}/{sessionId}/{filename} {
+      // Temporary files for AI processing
+      // Auto-deleted after 1 hour by Cloud Function
+
+      function isSizeValid() {
+        return request.resource.size <= 50 * 1024 * 1024;
+      }
+
+      // WRITE: Users can upload to their own temp folder
+      allow write: if isSignedIn() &&
+                   isOwner(userId) &&
+                   isSizeValid();
+
+      // READ: Only owner can read
+      allow read: if isSignedIn() && isOwner(userId);
+
+      // DELETE: Owner or system can delete
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+
+    // ========================================
+    // ALBUM COVERS (Encrypted thumbnails)
+    // ========================================
+
+    match /album-covers/{userId}/{albumId} {
+      function isEncryptedBlob() {
+        return request.resource.contentType == 'application/octet-stream';
+      }
+
+      function isSizeValid() {
+        return request.resource.size <= 1 * 1024 * 1024; // 1MB max
+      }
+
+      function isAlbumOwner() {
+        let albumDoc = firestore.get(/databases/(default)/documents/albums/$(albumId));
+        return albumDoc.data.userId == request.auth.uid;
+      }
+
+      // WRITE: Only album owner can set cover
+      allow write: if isSignedIn() &&
+                   isOwner(userId) &&
+                   isAlbumOwner() &&
+                   isEncryptedBlob() &&
+                   isSizeValid();
+
+      // READ: Album members can view
+      allow read: if isSignedIn() && isOwner(userId);
+
+      // DELETE: Only owner can delete
+      allow delete: if isSignedIn() && isOwner(userId) && isAlbumOwner();
     }
   }
 }

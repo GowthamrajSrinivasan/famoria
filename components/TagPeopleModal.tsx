@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { X, Save } from 'lucide-react';
+import { X, Save, Loader2 } from 'lucide-react';
 import { Photo } from '../types';
 import { Button } from './Button';
 import { FamilyMemberSelector } from './FamilyMemberSelector';
+import { useDecryptedThumbnail } from '../hooks/useDecryptedPhoto';
 
 interface TagPeopleModalProps {
     photo: Photo;
@@ -21,6 +22,9 @@ export const TagPeopleModal: React.FC<TagPeopleModalProps> = ({
         photo.peopleTags || []
     );
     const [isSaving, setIsSaving] = useState(false);
+
+    // Decrypt photo if encrypted
+    const { url: decryptedUrl, loading, error } = useDecryptedThumbnail(photo.url, photo.id);
 
     if (!isOpen) return null;
 
@@ -58,8 +62,20 @@ export const TagPeopleModal: React.FC<TagPeopleModalProps> = ({
 
                 <div className="p-6">
                     <div className="mb-6 flex justify-center">
-                        <div className="relative w-32 h-32 rounded-xl overflow-hidden shadow-md">
-                            <img src={photo.url} alt="Preview" className="w-full h-full object-cover" />
+                        <div className="relative w-32 h-32 rounded-xl overflow-hidden shadow-md bg-stone-100">
+                            {loading && (
+                                <div className="w-full h-full flex items-center justify-center">
+                                    <Loader2 size={24} className="text-stone-400 animate-spin" />
+                                </div>
+                            )}
+                            {error && (
+                                <div className="w-full h-full flex items-center justify-center">
+                                    <p className="text-stone-500 text-xs">Failed to load</p>
+                                </div>
+                            )}
+                            {!loading && !error && decryptedUrl && (
+                                <img src={decryptedUrl} alt="Preview" className="w-full h-full object-cover" />
+                            )}
                         </div>
                     </div>
 

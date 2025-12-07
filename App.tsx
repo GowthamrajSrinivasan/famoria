@@ -50,9 +50,8 @@ function ProtectedApp() {
   }, [searchQuery, photos]);
 
   const handleUploadComplete = (newPhoto: Photo) => {
-    // Optimistically add photo to state for immediate UI feedback
-    // The real-time listener will sync it properly
-    setPhotos(prevPhotos => [newPhoto, ...prevPhotos]);
+    // Don't add photo to state manually - let the real-time listener handle it
+    // This prevents duplicates and ensures consistent state
     setView(ViewState.GALLERY);
   };
 
@@ -186,6 +185,10 @@ function ProtectedApp() {
                     photo={photo}
                     onClick={setSelectedPhoto}
                     currentUser={user}
+                    onDelete={(photoId) => {
+                      // Photo will be automatically removed from feed by real-time listener
+                      console.log('Photo deleted:', photoId);
+                    }}
                   />
                 ))}
               </div>
@@ -253,6 +256,11 @@ function ProtectedApp() {
           currentUser={user}
           onClose={() => setSelectedPhoto(null)}
           onPhotoUpdate={handleUploadComplete}
+          onDelete={(photoId) => {
+            // Photo will be automatically removed from feed by real-time listener
+            console.log('Photo deleted:', photoId);
+            setSelectedPhoto(null);
+          }}
         />
       )}
 
