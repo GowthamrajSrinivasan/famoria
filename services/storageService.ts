@@ -1,5 +1,5 @@
 import { storage } from '../lib/firebase';
-import { ref, uploadBytes, getDownloadURL, uploadString } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, uploadString, deleteObject } from 'firebase/storage';
 
 export const storageService = {
   /**
@@ -33,5 +33,16 @@ export const storageService = {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Failed to fetch blob: ${response.statusText}`);
     return await response.blob();
+  },
+
+  /**
+   * Deletes a file from Firebase Storage
+   * @param path path in storage (e.g., 'albums/albumId/photos/photo.enc')
+   */
+  deleteFile: async (path: string): Promise<void> => {
+    const storageRef = ref(storage, path);
+    console.log(`[Storage] Deleting file at ${path}...`);
+    await deleteObject(storageRef);
+    console.log(`[Storage] File deleted successfully.`);
   }
 };

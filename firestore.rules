@@ -68,6 +68,19 @@ service cloud.firestore {
         allow read: if request.auth != null;
         allow create: if request.auth != null;
         allow update, delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+
+        // Comments subcollection for album photos
+        match /comments/{commentId} {
+          // Anyone authenticated can read comments
+          allow read: if request.auth != null;
+
+          // Authenticated users can add comments
+          allow create: if request.auth != null;
+
+          // Only comment author can delete their comment
+          allow delete: if request.auth != null &&
+                           request.auth.uid == resource.data.userId;
+        }
       }
     }
 

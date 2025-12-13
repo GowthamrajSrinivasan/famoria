@@ -257,7 +257,16 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         authorId: user.id
       };
 
-      const savedPhoto = await photoService.addEncryptedPhoto(albumId, encryptedPhotoRecord);
+      const savedPhoto = await photoService.addPhotoWithDualWrite(
+        albumId,
+        encryptedPhotoRecord,
+        {
+          caption: analysis.caption,
+          tags: analysis.tags,
+          author: user.name,
+          authorId: user.id
+        }
+      );
       console.log(`[Upload] Firestore record created: ${savedPhoto.id}`);
 
       // 3. Complete - Pass the DECRYPTED version for immediate UI display
