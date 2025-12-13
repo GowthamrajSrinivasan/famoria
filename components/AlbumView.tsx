@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Upload, Edit, Trash2, MoreVertical, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Upload, Edit, Trash2, MoreVertical, Image as ImageIcon, Lock, KeyRound } from 'lucide-react';
 import { Album, Photo } from '../types';
 import { PhotoCard } from './PhotoCard';
+import { photoService } from '../services/photoService';
+import { storageService } from '../services/storageService';
+import { useAuth } from '../context/AuthContext';
+import { Button } from './Button';
+import { VaultUnlockModal } from './VaultUnlockModal';
 
 interface AlbumViewProps {
     album: Album;
@@ -22,17 +27,130 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     onUpload,
     onPhotoClick
 }) => {
-    const [photos, setPhotos] = useState<Photo[]>([]);
+    const { getAlbumKey, unlockAlbum, autoUnlockAlbum } = useAuth();
+    const [rawPhotos, setRawPhotos] = useState<any[]>([]); // Encrypted docs
+    const [photos, setPhotos] = useState<Photo[]>([]); // Decrypted photos
     const [loading, setLoading] = useState(true);
     const [showMenu, setShowMenu] = useState(false);
+    const [showUnlock, setShowUnlock] = useState(false);
+    const [decrypting, setDecrypting] = useState(false);
+    const [checkingVault, setCheckingVault] = useState(false);
+    const hasAttemptedUnlock = React.useRef(false);
 
     const isOwner = currentUserId === album.createdBy;
+    const albumKey = getAlbumKey(album.id);
 
-    // TODO: Fetch photos from Firestore where albumId === album.id
+    // 1. Fetch Raw Encrypted Data
     useEffect(() => {
-        // Placeholder - integrate with photoService
-        setLoading(false);
+        setLoading(true);
+        const unsubscribe = photoService.subscribeToAlbum(album.id, (docs) => {
+            setRawPhotos(docs);
+            setLoading(false);
+        });
+        return () => unsubscribe();
     }, [album.id]);
+
+    // 2. Auto-Unlock & Decryption Pipeline
+    useEffect(() => {
+        // A. If Locked, Try Auto-Unlock (V4 Hardware Key)
+        if (!albumKey) {
+            setPhotos([]); // Clear photos if locked
+
+            // Only attempt unlock ONCE per mount
+            if (!hasAttemptedUnlock.current && !checkingVault) {
+                hasAttemptedUnlock.current = true; // Set BEFORE async call
+
+                const attemptUnlock = async () => {
+                    console.log(`[V4 Auto-Unlock] Attempting auto-unlock for album: ${album.id}`);
+                    setCheckingVault(true);
+                    const success = await autoUnlockAlbum(album.id);
+                    if (!success) {
+                        console.log(`[V4 Auto-Unlock] Failed - no DeviceKey in IndexedDB or Drive blob missing`);
+                    } else {
+                        console.log(`[V4 Auto-Unlock] Success - album unlocked`);
+                    }
+                    setCheckingVault(false);
+                };
+                attemptUnlock();
+            }
+            return;
+        }
+
+        // B. If Unlocked, Decrypt Photos
+        const decryptPhotos = async () => {
+            setDecrypting(true);
+            try {
+                // Dynamically import crypto modules to avoid bloating main bundle
+                const photoKeyModule = await import('../lib/crypto/photoKey');
+                const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+
+                const decrypted = await Promise.all(rawPhotos.map(async (doc) => {
+                    try {
+                        const photoId = doc.id;
+
+                        // A. Derive Key
+                        const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
+
+                        // B. Decrypt Metadata
+                        const metadata = await photoCryptoModule.decryptMetadata(
+                            {
+                                encrypted: doc.encryptedMetadata,
+                                iv: doc.metadataIv,
+                                authTag: doc.metadataAuthTag,
+                                photoIv: doc.photoIv // unused for meta but passed
+                            },
+                            photoKey
+                        );
+
+                        // C. Decrypt Image Blob
+                        // Check if we have a valid path
+                        if (!doc.encryptedPath) throw new Error("Missing file path");
+
+                        // We fetch the blob from storage
+                        const encryptedBlob = await storageService.downloadBlob(doc.encryptedPath);
+
+                        // Decrypt file
+                        const imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+                        const imageUrl = URL.createObjectURL(imageBlob);
+
+                        return {
+                            id: photoId,
+                            url: imageUrl,
+                            caption: metadata.caption,
+                            tags: metadata.tags || [],
+                            date: new Date(metadata.date).toLocaleDateString(),
+                            author: metadata.author,
+                            authorId: metadata.authorId,
+                            isEncrypted: true,
+                            likes: doc.likes || [],
+                            commentsCount: doc.commentsCount || 0
+                        } as Photo;
+                    } catch (err) {
+                        console.error(`Failed to decrypt photo ${doc.id}:`, err);
+                        return null;
+                    }
+                }));
+
+                setPhotos(decrypted.filter(p => p !== null) as Photo[]);
+            } catch (err) {
+                console.error("Critical decryption failure:", err);
+            } finally {
+                setDecrypting(false);
+            }
+        };
+
+        if (rawPhotos.length > 0) {
+            decryptPhotos();
+        } else {
+            // Even if empty, we are unlocked
+        }
+
+    }, [rawPhotos, albumKey]); // Re-run if data changes or key changes
+
+    const handleUnlockSuccess = (key: Uint8Array) => {
+        unlockAlbum(album.id, key);
+        // Effect will trigger decryption
+    };
 
     return (
         <div className="w-full">
@@ -55,7 +173,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                         <div className="flex items-center gap-3 text-sm text-stone-500">
                             <span className="flex items-center gap-1.5">
                                 <ImageIcon size={16} />
-                                {album.photoCount || 0} photos
+                                {photos.length} photos
                             </span>
                             <span>•</span>
                             <span className="capitalize">{album.privacy}</span>
@@ -64,6 +182,12 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                                     <span>•</span>
                                     <span>{album.members.length} members</span>
                                 </>
+                            )}
+
+                            {!albumKey && (
+                                <span className="flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full text-xs font-bold">
+                                    <Lock size={12} /> Vault Locked
+                                </span>
                             )}
                         </div>
                     </div>
@@ -128,6 +252,31 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                 <div className="flex items-center justify-center h-64">
                     <div className="w-12 h-12 border-4 border-stone-200 border-t-orange-500 rounded-full animate-spin" />
                 </div>
+            ) : !albumKey ? (
+                // Locked State (Check if we are auto-unlocking)
+                checkingVault ? (
+                    <div className="flex flex-col items-center justify-center h-64">
+                        <div className="w-12 h-12 border-4 border-stone-200 border-t-orange-500 rounded-full animate-spin mb-4" />
+                        <p className="text-stone-500 font-medium animate-pulse">Unlocking Vault...</p>
+                    </div>
+                ) : (
+                    <div className="text-center py-20 bg-stone-50 rounded-3xl border-2 border-dashed border-stone-200">
+                        <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-6">
+                            <Lock size={40} className="text-stone-300" />
+                        </div>
+                        <h3 className="text-xl font-semibold text-stone-700 mb-2">Encrypted Album</h3>
+                        <p className="text-stone-500 mb-8 max-w-sm mx-auto">This album is locked on this device. Use your Recovery Key to access it.</p>
+                        <Button onClick={() => setShowUnlock(true)} className="px-8 py-3">
+                            <KeyRound size={20} className="mr-2" />
+                            Unlock Gallery
+                        </Button>
+                    </div>
+                )
+            ) : decrypting ? (
+                <div className="flex flex-col items-center justify-center h-64">
+                    <div className="w-12 h-12 border-4 border-stone-200 border-t-teal-500 rounded-full animate-spin mb-4" />
+                    <p className="text-stone-500 font-medium animate-pulse">Decrypting memories...</p>
+                </div>
             ) : photos.length === 0 ? (
                 <div className="text-center py-20">
                     <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
@@ -144,17 +293,25 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                     </button>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-fade-in-up">
                     {photos.map((photo) => (
                         <PhotoCard
                             key={photo.id}
                             photo={photo}
                             onClick={() => onPhotoClick(photo)}
-                            currentUserId={currentUserId}
+                            currentUser={currentUserId ? { id: currentUserId } as any : null}
                         />
                     ))}
                 </div>
             )}
+
+            <VaultUnlockModal
+                isOpen={showUnlock}
+                onClose={() => setShowUnlock(false)}
+                onUnlock={handleUnlockSuccess}
+                albumId={album.id}
+                albumName={album.name}
+            />
         </div>
     );
 };
