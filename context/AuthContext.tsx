@@ -61,7 +61,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Broadcast to other tabs
     try {
-      const { broadcastUnlock } = await import('../lib/crypto/unlock');
+      const { broadcastUnlock } = await import('@/lib/crypto/unlock');
       broadcastUnlock(albumId, key);
     } catch (e) {
       console.error("Failed to broadcast unlock", e);
@@ -119,11 +119,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
           setUser(userData);
-
-          // Auto-unlock all albums after successful sign-in
-          if (googleAccessToken) {
-            autoUnlockAllAlbums(userData.id);
-          }
         } catch (err: any) {
           console.error('Firestore error:', err);
           setUser({
@@ -147,11 +142,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
+  // Auto-unlock all albums when Google token becomes available after sign-in
+  useEffect(() => {
+    if (user && googleAccessToken) {
+      console.log('[AuthContext] Google token available, triggering auto-unlock for all albums');
+      autoUnlockAllAlbums(user.id);
+    }
+  }, [user, googleAccessToken]);
+
+
   // Sync Master Key across tabs
   useEffect(() => {
     if (!user) return;
 
-    import('../lib/crypto/unlock').then(({ setupKeySync }) => {
+    import('@/lib/crypto/unlock').then(({ setupKeySync }) => {
       const cleanup = setupKeySync({
         onUnlock: (albumId, key) => {
           setAlbumKeys(prev => ({ ...prev, [albumId]: key }));
@@ -199,7 +203,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     try {
       // Broadcast lock before signing out
-      const { broadcastLock } = await import('../lib/crypto/unlock');
+      const { broadcastLock } = await import('@/lib/crypto/unlock');
       broadcastLock();
 
       await firebaseSignOut(auth);
@@ -210,7 +214,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // V4: Auto-Unlock from IDB
+  // V4: Auto-Unlock from IDB or Drive
   const autoUnlockAlbum = async (albumId: string): Promise<boolean> => {
     // 1. Check if already unlocked
     if (albumKeysRef.current[albumId]) {
@@ -218,61 +222,98 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     }
 
-    // 2. Check if we have a Device Key in IDB
+    // 2. Try DeviceKey path (fast path - hardware-bound security)
     try {
       console.log(`[AuthContext] Checking IndexedDB for DeviceKey: ${albumId}`);
       const { getDeviceKey } = await import('@/lib/crypto/keyStore');
       const { unwrapMasterKeyWithDevice } = await import('@/lib/crypto/deviceKey');
 
       const deviceKey = await getDeviceKey(albumId);
-      if (!deviceKey) {
-        console.log(`[AuthContext] No DeviceKey found in IndexedDB for ${albumId}`);
-        return false;
-      }
-      console.log(`[AuthContext] DeviceKey found in IndexedDB for ${albumId}`);
+      if (deviceKey) {
+        console.log(`[AuthContext] DeviceKey found in IndexedDB for ${albumId}`);
 
-      // 3. We have a Device Key (Authorized Device). Fetch Encryption Blob from Drive.
+        // 3. We have a Device Key (Authorized Device). Fetch Encryption Blob from Drive.
+        let token = googleAccessToken;
+        if (!token) {
+          console.log(`[AuthContext] No Google token, attempting refresh...`);
+          token = await refreshDriveToken();
+        }
+        if (!token) {
+          console.log(`[AuthContext] Failed to get Google Drive token`);
+          return false;
+        }
+
+        // 4. Fetch Blob
+        console.log(`[AuthContext] Fetching Drive blob for album ${albumId}`);
+        const { fetchDriveBlob } = await import('@/services/driveService');
+        const filename = `famoria_album_${albumId}.key`;
+        const blobDef = await fetchDriveBlob(filename, token);
+
+        if (!blobDef) {
+          console.log(`[AuthContext] No Drive blob found for ${filename}`);
+          // Fall through to Drive fallback
+        } else {
+          console.log(`[AuthContext] Drive blob fetched successfully`);
+
+          // 5. Unwrap
+          console.log(`[AuthContext] Unwrapping Master Key using DeviceKey...`);
+          const masterKey = await unwrapMasterKeyWithDevice(
+            albumId,
+            blobDef.encryptedMasterKey,
+            blobDef.iv,
+            blobDef.authTag
+          );
+
+          if (masterKey) {
+            console.log(`[AuthContext] Master Key unwrapped successfully, unlocking album`);
+            unlockAlbum(albumId, masterKey);
+            return true;
+          } else {
+            console.log(`[AuthContext] Failed to unwrap Master Key`);
+          }
+        }
+      } else {
+        console.log(`[AuthContext] No DeviceKey found in IndexedDB for ${albumId}`);
+      }
+    } catch (e) {
+      console.error("[AuthContext] DeviceKey path failed:", e);
+    }
+
+    // 3. Drive Fallback Path - Fetch plain MasterKey directly
+    console.log(`[AuthContext] Attempting Drive fallback to fetch plain MasterKey...`);
+    try {
       let token = googleAccessToken;
       if (!token) {
-        console.log(`[AuthContext] No Google token, attempting refresh...`);
+        console.log(`[AuthContext] No Google token for Drive fallback, attempting refresh...`);
         token = await refreshDriveToken();
       }
       if (!token) {
-        console.log(`[AuthContext] Failed to get Google Drive token`);
+        console.log(`[AuthContext] Failed to get Google Drive token for fallback`);
         return false;
       }
 
-      // 4. Fetch Blob
-      console.log(`[AuthContext] Fetching Drive blob for album ${albumId}`);
       const { fetchDriveBlob } = await import('@/services/driveService');
-      const filename = `famoria_album_${albumId}.key`;
-      const blobDef = await fetchDriveBlob(filename, token);
+      const { fromBase64 } = await import('@/lib/crypto/masterKey');
 
-      if (!blobDef) {
-        console.log(`[AuthContext] No Drive blob found for ${filename}`);
-        return false;
-      }
-      console.log(`[AuthContext] Drive blob fetched successfully`);
+      // Try to fetch plain MasterKey (new filename pattern)
+      const plainKeyFilename = `famoria_album_${albumId}_master.key`;
+      console.log(`[AuthContext] Fetching plain MasterKey from Drive: ${plainKeyFilename}`);
 
-      // 5. Unwrap
-      console.log(`[AuthContext] Unwrapping Master Key using DeviceKey...`);
-      const masterKey = await unwrapMasterKeyWithDevice(
-        albumId,
-        blobDef.encryptedMasterKey,
-        blobDef.iv,
-        blobDef.authTag
-      );
+      const plainKeyData = await fetchDriveBlob(plainKeyFilename, token);
 
-      if (masterKey) {
-        console.log(`[AuthContext] Master Key unwrapped successfully, unlocking album`);
+      if (plainKeyData && plainKeyData.masterKeyBase64) {
+        console.log(`[AuthContext] Plain MasterKey found in Drive, decoding...`);
+        const masterKey = fromBase64(plainKeyData.masterKeyBase64);
+        console.log(`[AuthContext] MasterKey decoded successfully, unlocking album`);
         unlockAlbum(albumId, masterKey);
         return true;
       } else {
-        console.log(`[AuthContext] Failed to unwrap Master Key`);
+        console.log(`[AuthContext] No plain MasterKey found in Drive for ${plainKeyFilename}`);
       }
     } catch (e) {
-      console.error("[AuthContext] Auto-unlock failed with error:", e);
+      console.error("[AuthContext] Drive fallback failed:", e);
     }
+
     return false;
   };
 

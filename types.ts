@@ -12,6 +12,8 @@ export interface Photo {
   commentsCount?: number;
   isAiGenerated?: boolean;
   originalPhotoId?: string; // If this is an edit
+  isEncrypted?: boolean; // Whether this photo is encrypted
+  albumPhotoId?: string; // Reference to the photo in album subcollection (for encrypted photos)
   // Enhanced fields for upload
   filename?: string;
   fileSize?: number;

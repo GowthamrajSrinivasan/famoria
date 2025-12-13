@@ -86,3 +86,27 @@ export async function fetchDriveBlob(filename: string, accessToken: string): Pro
     if (!res.ok) return null;
     return await res.json();
 }
+
+/**
+ * Save plain MasterKey to Google Drive for simplified auto-unlock
+ * @param albumId Album ID
+ * @param masterKeyBase64 Base64-encoded MasterKey
+ * @param accessToken Google Drive access token
+ */
+export async function savePlainMasterKey(
+    albumId: string,
+    masterKeyBase64: string,
+    accessToken: string
+): Promise<void> {
+    const filename = `famoria_album_${albumId}_master.key`;
+    const content = JSON.stringify({
+        version: 1,
+        albumId,
+        masterKeyBase64,
+        createdAt: new Date().toISOString()
+    });
+
+    console.log(`[DriveService] Saving plain MasterKey to Drive: ${filename}`);
+    await uploadDriveAppDataFile(filename, content, accessToken);
+    console.log(`[DriveService] Plain MasterKey saved successfully`);
+}
