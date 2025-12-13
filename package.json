@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
+    "argon2-browser": "^1.18.0",
     "browser-image-compression": "^2.0.2",
     "firebase": "^12.6.0",
+    "idb": "^8.0.3",
     "lucide-react": "^0.555.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
 import { auth, googleProvider, db } from '../lib/firebase';
-import { signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+
+// ... imports
 
 interface AuthContextType {
   user: User | null;
@@ -10,14 +12,32 @@ interface AuthContextType {
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
   error: string | null;
+  googleAccessToken: string | null;
+  refreshDriveToken: () => Promise<string | null>;
+
+  // Keyring Interface
+  albumKeys: Record<string, Uint8Array>;
+  unlockAlbum: (albumId: string, key: Uint8Array) => void;
+  lockAlbum: (albumId: string) => void;
+  getAlbumKey: (albumId: string) => Uint8Array | null;
+  lockAll: () => void;
+  autoUnlockAlbum: (albumId: string) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  signIn: async () => {},
-  signOut: async () => {},
+  signIn: async () => { },
+  signOut: async () => { },
   error: null,
+  googleAccessToken: null,
+  refreshDriveToken: async () => null,
+
+  albumKeys: {},
+  unlockAlbum: () => { },
+  lockAlbum: () => { },
+  getAlbumKey: () => null,
+  lockAll: () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -26,12 +46,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+
+  // Keyring State
+  const [albumKeys, setAlbumKeys] = useState<Record<string, Uint8Array>>({});
+  const albumKeysRef = React.useRef(albumKeys);
+
+  useEffect(() => {
+    albumKeysRef.current = albumKeys;
+  }, [albumKeys]);
+
+  const unlockAlbum = async (albumId: string, key: Uint8Array) => {
+    setAlbumKeys(prev => ({ ...prev, [albumId]: key }));
+
+    // Broadcast to other tabs
+    try {
+      const { broadcastUnlock } = await import('../lib/crypto/unlock');
+      broadcastUnlock(albumId, key);
+    } catch (e) {
+      console.error("Failed to broadcast unlock", e);
+    }
+  };
+
+  const lockAlbum = (albumId: string) => {
+    setAlbumKeys(prev => {
+      const newKeys = { ...prev };
+      delete newKeys[albumId];
+      return newKeys;
+    });
+  };
+
+  const getAlbumKey = (albumId: string) => albumKeys[albumId] || null;
+
+  const lockAll = () => {
+    setAlbumKeys({});
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      // ... existing user fetching logic ...
       if (firebaseUser) {
         try {
-          // Fetch or create user document in Firestore
+          // ... fetch user ...
           const userRef = doc(db, 'users', firebaseUser.uid);
           const userSnap = await getDoc(userRef);
 
@@ -44,7 +100,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
 
           if (!userSnap.exists()) {
-            // Initialize new user with Pro plan defaults
             await setDoc(userRef, {
               ...userData,
               createdAt: new Date().toISOString(),
@@ -52,27 +107,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               planLimit: 20,
               editsUsed: 0
             });
-          } else {
-            // Update last login
-            // We can merge data but let's keep it simple
           }
-
           setUser(userData);
         } catch (err: any) {
           console.error('Firestore error:', err);
-          // Still set user with auth data even if Firestore is offline
-          const userData: User = {
+          setUser({
             id: firebaseUser.uid,
             name: firebaseUser.displayName || 'Family Member',
             email: firebaseUser.email,
             avatar: firebaseUser.photoURL || 'https://api.dicebear.com/9.x/avataaars/svg?seed=' + firebaseUser.uid,
             lastLogin: new Date().toISOString()
-          };
-          setUser(userData);
-          setError('Unable to sync user data. Some features may be limited.');
+          });
+          setError('Unable to sync user data.');
         }
+
       } else {
         setUser(null);
+        setGoogleAccessToken(null);
+        lockAll(); // Local clear
       }
       setLoading(false);
     });
@@ -80,11 +132,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
+  // Sync Master Key across tabs
+  useEffect(() => {
+    if (!user) return;
+
+    import('../lib/crypto/unlock').then(({ setupKeySync }) => {
+      const cleanup = setupKeySync({
+        onUnlock: (albumId, key) => {
+          setAlbumKeys(prev => ({ ...prev, [albumId]: key }));
+        },
+        onLockAll: () => {
+          setAlbumKeys({});
+        },
+        getKeys: () => albumKeysRef.current
+      });
+      return cleanup;
+    });
+  }, [user]); // Run only when user session starts/changes
+
   const signIn = async () => {
     setLoading(true);
     setError(null);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const result = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setGoogleAccessToken(credential.accessToken);
+      }
     } catch (err: any) {
       console.error("Login failed", err);
       setError(err.message || 'Failed to sign in');
@@ -92,17 +166,121 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshDriveToken = async (): Promise<string | null> => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken;
+      if (token) {
+        setGoogleAccessToken(token);
+        return token;
+      }
+    } catch (err) {
+      console.error("Failed to refresh token", err);
+    }
+    return null;
+  };
+
   const signOut = async () => {
     try {
+      // Broadcast lock before signing out
+      const { broadcastLock } = await import('../lib/crypto/unlock');
+      broadcastLock();
+
       await firebaseSignOut(auth);
+      setGoogleAccessToken(null);
+      lockAll();
     } catch (err) {
       console.error("Logout failed", err);
     }
   };
 
+  // V4: Auto-Unlock from IDB
+  const autoUnlockAlbum = async (albumId: string): Promise<boolean> => {
+    // 1. Check if already unlocked
+    if (albumKeysRef.current[albumId]) {
+      console.log(`[AuthContext] Album ${albumId} already unlocked`);
+      return true;
+    }
+
+    // 2. Check if we have a Device Key in IDB
+    try {
+      console.log(`[AuthContext] Checking IndexedDB for DeviceKey: ${albumId}`);
+      const { getDeviceKey } = await import('@/lib/crypto/keyStore');
+      const { unwrapMasterKeyWithDevice } = await import('@/lib/crypto/deviceKey');
+
+      const deviceKey = await getDeviceKey(albumId);
+      if (!deviceKey) {
+        console.log(`[AuthContext] No DeviceKey found in IndexedDB for ${albumId}`);
+        return false;
+      }
+      console.log(`[AuthContext] DeviceKey found in IndexedDB for ${albumId}`);
+
+      // 3. We have a Device Key (Authorized Device). Fetch Encryption Blob from Drive.
+      let token = googleAccessToken;
+      if (!token) {
+        console.log(`[AuthContext] No Google token, attempting refresh...`);
+        token = await refreshDriveToken();
+      }
+      if (!token) {
+        console.log(`[AuthContext] Failed to get Google Drive token`);
+        return false;
+      }
+
+      // 4. Fetch Blob
+      console.log(`[AuthContext] Fetching Drive blob for album ${albumId}`);
+      const { fetchDriveBlob } = await import('@/services/driveService');
+      const filename = `famoria_album_${albumId}.key`;
+      const blobDef = await fetchDriveBlob(filename, token);
+
+      if (!blobDef) {
+        console.log(`[AuthContext] No Drive blob found for ${filename}`);
+        return false;
+      }
+      console.log(`[AuthContext] Drive blob fetched successfully`);
+
+      // 5. Unwrap
+      console.log(`[AuthContext] Unwrapping Master Key using DeviceKey...`);
+      const masterKey = await unwrapMasterKeyWithDevice(
+        albumId,
+        blobDef.encryptedMasterKey,
+        blobDef.iv,
+        blobDef.authTag
+      );
+
+      if (masterKey) {
+        console.log(`[AuthContext] Master Key unwrapped successfully, unlocking album`);
+        unlockAlbum(albumId, masterKey);
+        return true;
+      } else {
+        console.log(`[AuthContext] Failed to unwrap Master Key`);
+      }
+    } catch (e) {
+      console.error("[AuthContext] Auto-unlock failed with error:", e);
+    }
+    return false;
+  };
+
+  const value = {
+    user,
+    loading,
+    signIn,
+    signOut,
+    error,
+    googleAccessToken,
+    isDriveAuthenticated: !!googleAccessToken,
+    refreshDriveToken,
+    albumKeys,
+    unlockAlbum,
+    lockAlbum,
+    getAlbumKey,
+    lockAll,
+    autoUnlockAlbum // Export this
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut, error }}>
-      {children}
+    <AuthContext.Provider value={value}>
+      {!loading && children}
     </AuthContext.Provider>
   );
 };

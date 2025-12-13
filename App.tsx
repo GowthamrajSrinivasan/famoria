@@ -11,8 +11,10 @@ import { photoService } from './services/photoService';
 import { AlbumGrid } from './components/AlbumGrid';
 import { CreateAlbumModal } from './components/CreateAlbumModal';
 import { AlbumView } from './components/AlbumView';
+import { useAutoLock } from './hooks/useAutoLock';
 
 function ProtectedApp() {
+  useAutoLock(); // Initialize auto-lock
   const { user, loading, signOut } = useAuth();
   const [view, setView] = useState<ViewState>(ViewState.GALLERY);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -29,7 +31,7 @@ function ProtectedApp() {
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = photoService.subscribeToFeed((newPhotos) => {
+    const unsubscribe = photoService.subscribeToFeed(user.id, (newPhotos) => {
       setPhotos(newPhotos);
     });
 

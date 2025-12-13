@@ -47,16 +47,28 @@ service cloud.firestore {
 
     // Albums - users can read/write their own albums
     match /albums/{albumId} {
-      // Users can read their own albums or shared albums
-      allow read: if request.auth != null &&
-                     (request.auth.uid == resource.data.userId ||
-                      request.auth.uid in resource.data.sharedWith);
+      // READ: Allow if user is owner (createdBy/userId) or in members list
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.createdBy || 
+        request.auth.uid == resource.data.userId ||
+        request.auth.uid in resource.data.members
+      );
 
-      allow create: if request.auth != null &&
-                       request.auth.uid == request.resource.data.userId;
+      // CREATE: Allow creation if authenticated
+      allow create: if request.auth != null;
 
-      allow update, delete: if request.auth != null &&
-                               request.auth.uid == resource.data.userId;
+      // UPDATE/DELETE: Allow if owner (legacy userId or createdBy)
+      allow update, delete: if request.auth != null && (
+        request.auth.uid == resource.data.createdBy ||
+        request.auth.uid == resource.data.userId
+      );
+
+      // PHOTOS Subcollection
+      match /photos/{photoId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow update, delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+      }
     }
 
     // Fallback: deny all other access
