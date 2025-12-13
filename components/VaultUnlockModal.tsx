@@ -93,7 +93,12 @@ export const VaultUnlockModal: React.FC<VaultUnlockModalProps> = ({
             const filename = `famoria_album_${albumId}.key`;
             await uploadDriveAppDataFile(filename, JSON.stringify(blob), token!);
 
-            // 6. Unlock
+            // 7. Also save plain MasterKey for simplified auto-unlock (Drive fallback)
+            const { savePlainMasterKey } = await import('@/services/driveService');
+            await savePlainMasterKey(albumId, toBase64(masterKeyBytes), token!);
+            console.log('[VaultUnlockModal] Plain MasterKey saved to Drive for future auto-unlock');
+
+            // 8. Unlock
             onUnlock(masterKeyBytes);
             onClose();
 
