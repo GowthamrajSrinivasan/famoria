@@ -17,6 +17,7 @@
 9. Firestore & Storage rules (summary)
 10. Threat model & security guarantees
 11. Recovery / UX notes
+12. Phase-by-Phase Implementation Plan
 
 ---
 
@@ -245,11 +246,47 @@ export async function unlockMasterKey(albumId: string, pin: string, accessToken:
   // 4. Start auto-lock timer
   resetAutoLock();
 
-  // 5. clear pinKey
+  // 5. Setup Cross-Tab Sync (Web App)
+  broadcastUnlock(MASTER_KEY);
+
+  // 6. clear pinKey
   pinKeyBytes.fill(0);
 
   return true;
 }
+
+// ============================================
+// WEB APP SPECIFIC: CROSS-TAB SYNC
+// Use BroadcastChannel to share key in RAM only
+// WARNING: NEVER store MasterKey in localStorage
+// ============================================
+const LINK_CHANNEL = new BroadcastChannel('famoria_key_sync');
+
+export function broadcastUnlock(masterKey: Uint8Array) {
+  LINK_CHANNEL.onmessage = (event) => {
+    if (event.data === 'REQUEST_KEY' && masterKey) {
+      // Send key to the new tab (memory-to-memory only)
+      LINK_CHANNEL.postMessage({ type: 'SYNC_KEY', key: Array.from(masterKey) });
+    }
+  };
+}
+
+export function trySyncKey(): Promise<Uint8Array | null> {
+  return new Promise((resolve) => {
+    LINK_CHANNEL.postMessage('REQUEST_KEY');
+    const timeout = setTimeout(() => resolve(null), 500); // 500ms wait
+    LINK_CHANNEL.onmessage = (event) => {
+      if (event.data?.type === 'SYNC_KEY') {
+        clearTimeout(timeout);
+        const syncedKey = new Uint8Array(event.data.key);
+        // Setup state...
+        MASTER_KEY = syncedKey;
+        resolve(syncedKey);
+      }
+    };
+  });
+}
+
 
 // Correct Logic via Timestamp (localStorage for cross-tab/persistence)
 const LAST_ACTIVE_KEY = 'famoria_last_active';
@@ -398,16 +435,59 @@ Encryption / decryption flows remain identical to prior spec — but crucially: 
 
 ---
 
-## Appendix: Checklist for engineers (must-follow)
+## 12. Phase-by-Phase Implementation Plan
 
-* [ ] Enforce PIN creation at album creation time.
-* [ ] Use Argon2id with strong memory/time parameters in-browser (WASM / libsodium / argon2-browser).
-* [ ] Store only `driveBlob` in Drive `appDataFolder`.
-* [ ] Ensure `MASTER_KEY` lives only in RAM and is zeroed when locked.
-* [ ] Implement auto-lock (15 minutes) and lock on background/visibilitychange.
-* [ ] Invite flow encrypts masterKey client-side and only transmits encrypted payloads.
-* [ ] Server never logs or stores plaintext keys or PINs.
-* [ ] Provide optional Recovery Kit flow and document user responsibilities.
+This plan breaks down the strict security architecture into 4 executable phases.
+
+### Phase 1: Cryptographic Foundation (Day 1-2)
+**Goal**: Establish the "Root of Trust" using Argon2id and WebCrypto.
+
+1.  **Dependencies**: Install `argon2-browser` or `argon2-wasm`.
+2.  **Argon2 Service**:
+    *   Implement benchmark utility to auto-tune memory/time.
+    *   Create helper to derive `PIN_Key` from User PIN input.
+3.  **Master Key Logic**:
+    *   Implement `generateMasterKey()` (CSPRNG).
+    *   Implement `wrapMasterKey(mk, pinKey)` using AES-GCM.
+    *   Implement `unwrapMasterKey(blob, pinKey)` using AES-GCM.
+4.  **Unit Tests**: Verify key generation and derivation vectors.
+
+### Phase 2: Album Creation & PIN Enforcement (Day 3-5)
+**Goal**: Prevent any album creation without a PIN-wrapped Master Key.
+
+1.  **UI/UX**: Create "New Album" wizard with mandatory PIN setup screen.
+2.  **Recovery Kit**: Generate fallback key (32-hex) and prompt user to download PDF/TXT.
+3.  **Drive Integration**:
+    *   Implement upload to `appDataFolder` (`famoria_album_${id}.key`).
+    *   Verify only encrypted JSON blob is transmitted.
+4.  **State Management**:
+    *   Store `MasterKey` in a global React Context / Redux store (volatile RAM).
+    *   **Verify**: Reloading page should clear state.
+
+### Phase 3: Session Security & Auto-Lock (Day 6-7)
+**Goal**: Protect the key in memory.
+
+1.  **Auto-Lock Timer**:
+    *   Implement `localStorage` timestamp tracking.
+    *   Hook into `visibilitychange`, `mousemove`, `keydown`.
+    *   Create `lockSession()` to wipe memory.
+2.  **Unlock Screen**:
+    *   Create modal for PIN re-entry if `MasterKey` is null but Album is active.
+3.  **Cross-Tab Sync ("Magic Unlock")**:
+    *   Implement `BroadcastChannel` logic to share `MasterKey` memory-to-memory when a new tab opens (`trySyncKey`).
+    *   Implement "Global Lock" via `localStorage` event listener to ensure all tabs lock when one does.
+
+### Phase 4: Encryption Pipeline Integration (Day 8-10)
+**Goal**: Connect the secure key to the photo upload/download flow.
+
+1.  **HKDF Integration**:
+    *   Implement `derivePhotoKey(masterKey, photoId)`.
+2.  **Upload Flow**:
+    *   Update `Uploader.tsx`: Check for `MasterKey` → Derive Photo Key → Encrypt → Upload.
+3.  **Download/View Flow**:
+    *   Update `PhotoCard.tsx`: Check for `MasterKey` → Derive Photo Key → Decrypt → URL.createObjectURL.
+4.  **End-to-End Test**:
+    *   Full flow: Create Album → Set PIN → Upload Photo → Refresh Page → Unlock with PIN → View Photo.
 
 ---
 
