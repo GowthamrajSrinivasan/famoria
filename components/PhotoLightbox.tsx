@@ -1,19 +1,24 @@
 import React, { useState } from 'react';
-import { X, Calendar, Share2, MoreVertical, Sparkles } from 'lucide-react';
+import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2 } from 'lucide-react';
 import { Photo, User } from '../types';
 import { CommentSection } from './CommentSection';
 import { LikeButton } from './LikeButton';
 import { EditPhotoModal } from './EditPhotoModal';
+import { photoService } from '../services/photoService';
 
 interface PhotoLightboxProps {
   photo: Photo;
   currentUser: User | null;
   onClose: () => void;
   onPhotoUpdate?: (photo: Photo) => void; // Optional callback if we want to update the feed immediately
+  onPhotoDelete?: () => void; // Optional callback after successful deletion
 }
 
-export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser, onClose, onPhotoUpdate }) => {
+export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser, onClose, onPhotoUpdate, onPhotoDelete }) => {
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
 
   // Close on Escape key
   React.useEffect(() => {
@@ -37,6 +42,34 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
     // but for now, we'll just close the edit modal.
     setShowEditModal(false);
     onClose(); // Close lightbox to return to feed where new photo should be
+  };
+
+  const handleDelete = async () => {
+    if (!photo.albumId) {
+      alert('Cannot delete photo: Album information missing');
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      // Get encryptedPath from photo data if available
+      const encryptedPath = (photo as any).encryptedPath;
+
+      await photoService.deletePhotoCompletely(
+        photo.albumId,
+        photo.id,
+        encryptedPath
+      );
+
+      // Notify parent and close
+      if (onPhotoDelete) onPhotoDelete();
+      onClose();
+    } catch (error) {
+      console.error('Failed to delete photo:', error);
+      alert('Failed to delete photo. Please try again.');
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
   };
 
   if (showEditModal) {
@@ -87,9 +120,42 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                   </div>
                 </div>
               </div>
-              <button className="text-stone-400 hover:bg-stone-50 p-2 rounded-full transition-colors">
-                <MoreVertical size={20} />
-              </button>
+
+              {/* More Menu - Only for photo owner */}
+              {currentUser?.id === photo.authorId && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowMenu(!showMenu)}
+                    className="text-stone-400 hover:bg-stone-50 p-2 rounded-full transition-colors"
+                  >
+                    <MoreVertical size={20} />
+                  </button>
+
+                  {showMenu && (
+                    <>
+                      {/* Backdrop */}
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setShowMenu(false)}
+                      />
+
+                      {/* Menu */}
+                      <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-stone-100 py-1 min-w-[140px] z-20 animate-fade-in-up">
+                        <button
+                          onClick={() => {
+                            setShowMenu(false);
+                            setShowDeleteConfirm(true);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                        >
+                          <Trash2 size={14} />
+                          <span>Delete Photo</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             <p className="text-stone-700 leading-relaxed text-[15px]">{photo.caption}</p>
@@ -133,6 +199,34 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-10 rounded-3xl">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-fade-in-up">
+            <h3 className="text-xl font-bold text-stone-800 mb-2">Delete Photo?</h3>
+            <p className="text-stone-600 mb-6">
+              This will permanently delete this photo from your album and the family feed. This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-3 bg-stone-100 text-stone-700 rounded-xl hover:bg-stone-200 transition-colors font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -87,7 +87,6 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, current
                 {/* Actions Line */}
                 <div className="flex items-center gap-4 mt-1 ml-2">
                   <button className="text-[11px] font-medium text-stone-400 hover:text-stone-600">Like</button>
-                  <button className="text-[11px] font-medium text-stone-400 hover:text-stone-600">Reply</button>
                   {currentUser?.id === comment.userId && (
                     <button
                       onClick={() => deleteComment(comment.id)}
