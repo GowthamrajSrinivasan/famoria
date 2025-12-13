@@ -440,7 +440,7 @@ Encryption / decryption flows remain identical to prior spec — but crucially: 
 This plan breaks down the strict security architecture into 4 executable phases.
 
 ### Phase 1: Cryptographic Foundation (Day 1-2)
-**Goal**: Establish the "Root of Trust" using Argon2id and WebCrypto.
+**Goal**: Establish the "Root of Trust" using Argon2id and WebCrypto in `lib/crypto`.
 
 1.  **Dependencies**: Install `argon2-browser` or `argon2-wasm`.
 2.  **Argon2 Service**:
@@ -458,36 +458,39 @@ This plan breaks down the strict security architecture into 4 executable phases.
 1.  **UI/UX**: Create "New Album" wizard with mandatory PIN setup screen.
 2.  **Recovery Kit**: Generate fallback key (32-hex) and prompt user to download PDF/TXT.
 3.  **Drive Integration**:
-    *   Implement upload to `appDataFolder` (`famoria_album_${id}.key`).
+    *   Implement upload to `appDataFolder` (`famoria_album_${id}.key`) - *requires adding Drive scope to `AuthContext.tsx`*.
     *   Verify only encrypted JSON blob is transmitted.
 4.  **State Management**:
-    *   Store `MasterKey` in a global React Context / Redux store (volatile RAM).
-    *   **Verify**: Reloading page should clear state.
+    *   Update `context/AuthContext.tsx` to hold `MasterKey` in state (volatile RAM).
+    *   **Verify**: Reloading page should clear state (key = null).
 
 ### Phase 3: Session Security & Auto-Lock (Day 6-7)
 **Goal**: Protect the key in memory.
 
 1.  **Auto-Lock Timer**:
-    *   Implement `localStorage` timestamp tracking.
-    *   Hook into `visibilitychange`, `mousemove`, `keydown`.
-    *   Create `lockSession()` to wipe memory.
+    *   Create `hooks/useAutoLock.ts` implementing `localStorage` timestamp tracking.
+    *   Hook into `visibilitychange`, `mousemove`, `keydown` in `App.tsx` or main layout.
+    *   Create `lockSession()` in `AuthContext` to wipe memory.
 2.  **Unlock Screen**:
-    *   Create modal for PIN re-entry if `MasterKey` is null but Album is active.
+    *   Create `components/UnlockModal.tsx` for PIN re-entry if `MasterKey` is null but User is logged in.
 3.  **Cross-Tab Sync ("Magic Unlock")**:
-    *   Implement `BroadcastChannel` logic to share `MasterKey` memory-to-memory when a new tab opens (`trySyncKey`).
-    *   Implement "Global Lock" via `localStorage` event listener to ensure all tabs lock when one does.
+    *   Implement `BroadcastChannel` in `lib/crypto/unlock.ts` to share `MasterKey` memory-to-memory.
+    *   Implement "Global Lock" via `localStorage` event listener in `AuthContext`.
 
 ### Phase 4: Encryption Pipeline Integration (Day 8-10)
 **Goal**: Connect the secure key to the photo upload/download flow.
 
 1.  **HKDF Integration**:
-    *   Implement `derivePhotoKey(masterKey, photoId)`.
-2.  **Upload Flow**:
-    *   Update `Uploader.tsx`: Check for `MasterKey` → Derive Photo Key → Encrypt → Upload.
-3.  **Download/View Flow**:
-    *   Update `PhotoCard.tsx`: Check for `MasterKey` → Derive Photo Key → Decrypt → URL.createObjectURL.
-4.  **End-to-End Test**:
-    *   Full flow: Create Album → Set PIN → Upload Photo → Refresh Page → Unlock with PIN → View Photo.
+    *   Implement `derivePhotoKey(masterKey, photoId)` in `lib/crypto/photoKey.ts`.
+2.  **Upload Flow (`components/Uploader.tsx`)**:
+    *   Hook: `const { masterKey } = useAuth()`.
+    *   Pre-Upload: `encryptImage(file, key)` -> `blob`.
+    *   Upload `blob` to Storage instead of raw file.
+3.  **Download/View Flow (`components/PhotoCard.tsx` / `components/PhotoLightbox.tsx`)**:
+    *   Hook: `const { masterKey } = useAuth()`.
+    *   Fetch encrypted blob -> `decryptImage(blob, key)` -> `URL.createObjectURL(decryptedBlob)`.
+4.  **Service Layer (`services/photoService.ts`)**:
+    *   Update `addPhoto` to store `encryptedMetadata` (Base64) instead of plaintext caption/tags.
 
 ---
 
