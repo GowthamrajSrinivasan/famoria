@@ -83,35 +83,49 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                 // Dynamically import crypto modules to avoid bloating main bundle
                 const photoKeyModule = await import('../lib/crypto/photoKey');
                 const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+                const { cacheService } = await import('../services/cacheService');
 
                 const decrypted = await Promise.all(rawPhotos.map(async (doc) => {
                     try {
                         const photoId = doc.id;
 
-                        // A. Derive Key
+                        // Derive Key (needed for both cache miss and metadata)
                         const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
 
-                        // B. Decrypt Metadata
+                        // A. Check cache first (thumbnail)
+                        let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
+                        let imageUrl: string;
+
+                        if (imageBlob) {
+                            console.log(`[AlbumView] Cache hit for thumbnail ${photoId}`);
+                            imageUrl = URL.createObjectURL(imageBlob);
+                        } else {
+                            // B. Cache miss - decrypt thumbnail
+                            console.log(`[AlbumView] Cache miss for ${photoId}, decrypting thumbnail...`);
+
+                            // Determine path - use thumbnail if available, fallback to full
+                            const pathToLoad = doc.thumbnailPath || doc.encryptedPath;
+                            if (!pathToLoad) throw new Error("Missing file path");
+
+                            // Download and decrypt
+                            const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+                            imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+                            imageUrl = URL.createObjectURL(imageBlob);
+
+                            // Cache the decrypted thumbnail
+                            await cacheService.setCachedDecryptedPhoto(photoId, album.id, imageBlob, 'thumbnail');
+                        }
+
+                        // C. Decrypt Metadata (always decrypt metadata, it's small)
                         const metadata = await photoCryptoModule.decryptMetadata(
                             {
                                 encrypted: doc.encryptedMetadata,
                                 iv: doc.metadataIv,
                                 authTag: doc.metadataAuthTag,
-                                photoIv: doc.photoIv // unused for meta but passed
+                                photoIv: doc.photoIv
                             },
                             photoKey
                         );
-
-                        // C. Decrypt Image Blob
-                        // Check if we have a valid path
-                        if (!doc.encryptedPath) throw new Error("Missing file path");
-
-                        // We fetch the blob from storage
-                        const encryptedBlob = await storageService.downloadBlob(doc.encryptedPath);
-
-                        // Decrypt file
-                        const imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
-                        const imageUrl = URL.createObjectURL(imageBlob);
 
                         return {
                             id: photoId,
