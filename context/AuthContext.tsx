@@ -74,12 +74,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       delete newKeys[albumId];
       return newKeys;
     });
+
+    // Clear decrypted cache for security
+    import('../services/cacheService').then(({ cacheService }) => {
+      cacheService.clearAlbumCache(albumId).catch(console.error);
+    });
   };
 
   const getAlbumKey = (albumId: string) => albumKeys[albumId] || null;
 
   const lockAll = () => {
     setAlbumKeys({});
+
+    // Clear all decrypted cache for security
+    import('../services/cacheService').then(({ cacheService }) => {
+      cacheService.clearAllCache().catch(console.error);
+    });
   };
 
   useEffect(() => {
@@ -109,6 +119,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
           }
           setUser(userData);
+
+          // Auto-unlock all albums after successful sign-in
+          if (googleAccessToken) {
+            autoUnlockAllAlbums(userData.id);
+          }
         } catch (err: any) {
           console.error('Firestore error:', err);
           setUser({
@@ -259,6 +274,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error("[AuthContext] Auto-unlock failed with error:", e);
     }
     return false;
+  };
+
+  // Auto-unlock all user albums after sign-in
+  const autoUnlockAllAlbums = async (userId: string) => {
+    try {
+      console.log('[AuthContext] Auto-unlocking all albums for user:', userId);
+      const { subscribeToAlbums } = await import('../services/albumService');
+
+      // Subscribe to user albums and attempt unlock
+      const unsubscribe = subscribeToAlbums(userId, async (albums) => {
+        console.log(`[AuthContext] Found ${albums.length} albums, attempting auto-unlock...`);
+
+        // Attempt to unlock each album
+        const unlockPromises = albums.map(album =>
+          autoUnlockAlbum(album.id).catch(err => {
+            console.warn(`[AuthContext] Failed to auto-unlock album ${album.id}:`, err);
+            return false;
+          })
+        );
+
+        const results = await Promise.all(unlockPromises);
+        const successCount = results.filter(Boolean).length;
+        console.log(`[AuthContext] Auto-unlocked ${successCount}/${albums.length} albums`);
+
+        // Unsubscribe after first attempt
+        unsubscribe();
+      });
+    } catch (error) {
+      console.error('[AuthContext] Error during auto-unlock all:', error);
+    }
   };
 
   const value = {

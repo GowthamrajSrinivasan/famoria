@@ -209,19 +209,32 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       // 1. Prepare Data
       const photoId = crypto.randomUUID();
       const fileName = `${Date.now()}_${photoId}.enc`;
-      // Use the user's requested folder structure, but with .enc extension
       const storagePath = `albums/${albumId}/photos/${fileName}`;
+      const thumbnailPath = storageService.getThumbnailPath(storagePath);
 
-      // 2. Derive Key & Encrypt File
-      console.log(`[Upload] Deriving key and encrypting file...`);
+      // 2. Generate Thumbnail
+      console.log(`[Upload] Generating thumbnail...`);
+      const imageUtils = await import('../lib/imageUtils');
+      const thumbnail = await imageUtils.generateThumbnail(fileToUpload, 400, 0.8);
+      console.log(`[Upload] Thumbnail generated: ${(thumbnail.size / 1024).toFixed(1)}KB (original: ${(fileToUpload.size / 1024).toFixed(1)}KB)`);
+
+      // 3. Derive Key & Encrypt Both Files
+      console.log(`[Upload] Deriving key and encrypting files...`);
       const keyModule = await import('../lib/crypto/photoKey');
       const cryptoModule = await import('../lib/crypto/photoCrypto');
 
       const photoKey = await keyModule.derivePhotoKey(albumKey, photoId);
-      const encryptedFile = await cryptoModule.encryptFile(fileToUpload, photoKey);
-      console.log(`[Upload] Encryption complete. Encrypted size: ${encryptedFile.size} bytes`);
 
-      // 3. Encrypt Metadata
+      // Encrypt full image
+      const encryptedFile = await cryptoModule.encryptFile(fileToUpload, photoKey);
+      console.log(`[Upload] Full image encrypted: ${(encryptedFile.size / 1024).toFixed(1)}KB`);
+
+      // Encrypt thumbnail
+      const thumbnailFile = new File([thumbnail], 'thumbnail.webp', { type: 'image/webp' });
+      const encryptedThumbnail = await cryptoModule.encryptFile(thumbnailFile, photoKey);
+      console.log(`[Upload] Thumbnail encrypted: ${(encryptedThumbnail.size / 1024).toFixed(1)}KB`);
+
+      // 4. Encrypt Metadata
       const metadata = {
         caption: analysis.caption,
         tags: analysis.tags,
@@ -232,13 +245,16 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
 
       const encMeta = await cryptoModule.encryptMetadata(metadata, photoKey);
 
-      // 4. Upload Encrypted Blob
-      // storageService handles the actual upload
-      console.log(`[Upload] Starting storage upload to: ${storagePath}`);
-      await storageService.uploadImage(encryptedFile, storagePath);
-      console.log(`[Upload] Storage upload successful`);
+      // 5. Upload Both Encrypted Blobs with CDN Caching
+      console.log(`[Upload] Uploading full image to: ${storagePath}`);
+      await storageService.uploadWithCaching(encryptedFile, storagePath);
+      console.log(`[Upload] Full image uploaded`);
 
-      // 5. Save Record to Firestore
+      console.log(`[Upload] Uploading thumbnail to: ${thumbnailPath}`);
+      await storageService.uploadWithCaching(encryptedThumbnail, thumbnailPath);
+      console.log(`[Upload] Thumbnail uploaded`);
+
+      // 6. Save Record to Firestore (with both paths)
       console.log(`[Upload] Creating Firestore record...`);
       const encryptedPhotoRecord = {
         id: photoId,
@@ -247,6 +263,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         createdAt: Date.now(),
 
         encryptedPath: storagePath,
+        thumbnailPath: thumbnailPath, // NEW: Store thumbnail path
 
         encryptedMetadata: encMeta.encrypted,
         metadataIv: encMeta.iv,
@@ -269,7 +286,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       );
       console.log(`[Upload] Firestore record created: ${savedPhoto.id}`);
 
-      // 3. Complete - Pass the DECRYPTED version for immediate UI display
+      // 7. Complete - Pass the DECRYPTED version for immediate UI display
       const displayPhoto = {
         id: savedPhoto.id,
         url: preview, // Use local preview

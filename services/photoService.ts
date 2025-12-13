@@ -63,14 +63,15 @@ export const photoService = {
   // DUAL-WRITE: For encrypted photos that should also appear in Family Feed
   addPhotoWithDualWrite: async (albumId: string, encryptedPhotoData: any, feedMetadata: { caption: string; tags: string[]; author: string; authorId: string }) => {
     // 1. Write encrypted data to album subcollection
-    const docRef = await addDoc(collection(db, 'albums', albumId, 'photos'), {
+    const albumDocRef = await addDoc(collection(db, 'albums', albumId, 'photos'), {
       ...encryptedPhotoData,
       createdAt: serverTimestamp()
     });
 
     // 2. Write reference record to top-level photos collection for Family Feed
-    await addDoc(collection(db, PHOTOS_COLLECTION), {
-      id: docRef.id,
+    // Use the same document ID in feed collection to maintain consistency
+    const feedDocRef = await addDoc(collection(db, PHOTOS_COLLECTION), {
+      albumPhotoId: albumDocRef.id,  // Reference to album photo
       albumId: albumId,
       caption: feedMetadata.caption,
       tags: feedMetadata.tags,
@@ -82,7 +83,7 @@ export const photoService = {
       commentsCount: 0
     });
 
-    return { ...encryptedPhotoData, id: docRef.id };
+    return { ...encryptedPhotoData, id: albumDocRef.id };
   },
 
   subscribeToAlbum: (albumId: string, callback: (photos: any[]) => void) => {
