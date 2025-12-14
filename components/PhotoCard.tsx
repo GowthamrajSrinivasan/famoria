@@ -23,6 +23,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
   const [displayUrls, setDisplayUrls] = useState<string[]>([]);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  const [albumName, setAlbumName] = useState<string | null>(null);
 
   const post = isPost(photo) ? photo : null;
   const photoCount = post ? post.photoIds.length : 1;
@@ -162,6 +163,31 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
     decryptPhotos();
   }, [photo.id, photo.isEncrypted, photo.albumId, getAlbumKey]);
 
+  // Fetch album name
+  useEffect(() => {
+    const fetchAlbumName = async () => {
+      if (!photo.albumId) {
+        setAlbumName(null);
+        return;
+      }
+
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('../lib/firebase');
+        const albumRef = doc(db, 'albums', photo.albumId);
+        const albumSnap = await getDoc(albumRef);
+
+        if (albumSnap.exists()) {
+          setAlbumName(albumSnap.data().name);
+        }
+      } catch (error) {
+        console.error('[PhotoCard] Failed to fetch album name:', error);
+      }
+    };
+
+    fetchAlbumName();
+  }, [photo.albumId]);
+
   const handlePrevImage = (e: React.MouseEvent) => {
     e.stopPropagation();
     setCurrentImageIndex((prev) => (prev === 0 ? photoCount - 1 : prev - 1));
@@ -266,6 +292,16 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
         </p>
 
         <div className="flex flex-wrap gap-2 mb-5">
+          {/* Album name with distinct styling */}
+          {albumName && (
+            <span className="px-2.5 py-1 rounded-md bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 text-xs font-bold tracking-wide border border-blue-200 flex items-center gap-1">
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+              </svg>
+              {albumName}
+            </span>
+          )}
+          {/* Regular tags */}
           {(photo.tags || []).slice(0, 3).map((tag, idx) => (
             <span key={idx} className="px-2.5 py-1 rounded-md bg-stone-50 text-stone-500 text-xs font-semibold tracking-wide border border-stone-100">
               #{tag}

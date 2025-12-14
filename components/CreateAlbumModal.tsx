@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { X, Image as ImageIcon, Lock, Users, Globe, Key, AlertTriangle, Download, Check, Loader2 } from 'lucide-react';
+import { X, Image as ImageIcon, Lock, Users, Globe, Key, AlertTriangle, Download, Check, Loader2, Upload } from 'lucide-react';
 import { Album } from '../types';
 import { createAlbum, updateAlbum } from '../services/albumService';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
 import { generateAndStoreDeviceKey, wrapMasterKeyForDevice } from '@/lib/crypto/deviceKey';
 import { uploadDriveAppDataFile } from '@/services/driveService';
-import { db } from '../lib/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db, storage } from '../lib/firebase';
+import { doc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 interface CreateAlbumModalProps {
     isOpen: boolean;
@@ -33,6 +34,8 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [privacy, setPrivacy] = useState<'private' | 'family' | 'public'>('family');
+    const [coverFile, setCoverFile] = useState<File | null>(null);
+    const [coverPreview, setCoverPreview] = useState<string | null>(null);
 
     // Crypto State
     const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
@@ -45,6 +48,8 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
             setName(editAlbum.name);
             setDescription(editAlbum.description || '');
             setPrivacy(editAlbum.privacy);
+            setCoverPreview(editAlbum.coverPhoto || null);
+            setCoverFile(null);
         } else {
             setName('');
             setDescription('');
@@ -52,6 +57,8 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
             setRecoveryKey(null);
             setHasDownloaded(false);
             setStep('DETAILS');
+            setCoverFile(null);
+            setCoverPreview(null);
         }
         setError('');
     }, [editAlbum, isOpen]);
@@ -71,17 +78,88 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
         }
     };
 
+    // Handle cover image file selection
+    const handleCoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+            setError('Please select an image file');
+            return;
+        }
+
+        // Validate file size (max 5MB for original)
+        if (file.size > 5 * 1024 * 1024) {
+            setError('Image must be less than 5MB');
+            return;
+        }
+
+        setCoverFile(file);
+
+        // Create preview
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setCoverPreview(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+        setError('');
+    };
+
+    // Upload cover image thumbnail to Storage
+    const uploadCoverImage = async (): Promise<string | null> => {
+        if (!coverFile) return null;
+
+        try {
+            // Generate thumbnail
+            const imageUtils = await import('../lib/imageUtils');
+            const thumbnailBlob = await imageUtils.generateThumbnail(coverFile, 400);
+
+            // Upload to Storage
+            const filename = `album_cover_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`;
+            const storageRef = ref(storage, `albums/covers/${filename}`);
+            await uploadBytes(storageRef, thumbnailBlob);
+
+            // Get download URL
+            const downloadURL = await getDownloadURL(storageRef);
+            return downloadURL;
+        } catch (err) {
+            console.error('Failed to upload cover image:', err);
+            throw new Error('Failed to upload cover image');
+        }
+    };
+
     const handleSubmitData = async () => {
         setIsSubmitting(true);
         setError('');
 
         try {
+            // Upload cover image if changed
+            let coverPhotoURL = editAlbum?.coverPhoto || null;
+            if (coverFile) {
+                coverPhotoURL = await uploadCoverImage();
+            }
+
             if (editAlbum) {
-                await updateAlbum(editAlbum.id, {
+                const updates: any = {
                     name: name.trim(),
                     description: description.trim(),
                     privacy
-                });
+                };
+
+                // Only update cover if changed
+                if (coverFile) {
+                    updates.coverPhoto = coverPhotoURL;
+                }
+
+                await updateAlbum(editAlbum.id, updates);
+
+                // Also update coverPhoto in Firestore directly if needed
+                if (coverFile && coverPhotoURL) {
+                    const albumRef = doc(db, 'albums', editAlbum.id);
+                    await updateDoc(albumRef, { coverPhoto: coverPhotoURL });
+                }
+
                 onSuccess(editAlbum.id);
                 onClose();
             } else {
@@ -140,7 +218,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     masterKeyId: masterKeyId,
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
-                    coverPhoto: null,
+                    coverPhoto: coverPhotoURL,
                     photoCount: 0
                 });
 
@@ -219,6 +297,45 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                     className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-200 outline-none transition-all"
                                     autoFocus
                                 />
+                            </div>
+
+                            {/* Cover Image Upload */}
+                            <div>
+                                <label className="block text-sm font-semibold text-stone-700 mb-2">Cover Image (Optional)</label>
+                                <div className="space-y-3">
+                                    {coverPreview && (
+                                        <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-stone-100">
+                                            <img
+                                                src={coverPreview}
+                                                alt="Cover preview"
+                                                className="w-full h-full object-cover"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setCoverFile(null);
+                                                    setCoverPreview(editAlbum?.coverPhoto || null);
+                                                }}
+                                                className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition-colors"
+                                            >
+                                                <X size={16} />
+                                            </button>
+                                        </div>
+                                    )}
+                                    <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-stone-200 rounded-xl hover:border-orange-300 hover:bg-orange-50/50 transition-all cursor-pointer">
+                                        <Upload size={24} className="text-stone-400 mb-2" />
+                                        <span className="text-sm text-stone-500">
+                                            {coverPreview ? 'Change cover image' : 'Upload cover image'}
+                                        </span>
+                                        <span className="text-xs text-stone-400 mt-1">JPG, PNG up to 5MB</span>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleCoverFileChange}
+                                            className="hidden"
+                                        />
+                                    </label>
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-semibold text-stone-700 mb-2">Privacy</label>
