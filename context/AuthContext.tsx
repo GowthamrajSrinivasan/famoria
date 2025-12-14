@@ -56,16 +56,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     albumKeysRef.current = albumKeys;
   }, [albumKeys]);
 
-  const unlockAlbum = async (albumId: string, key: Uint8Array) => {
-    setAlbumKeys(prev => ({ ...prev, [albumId]: key }));
+  const unlockAlbum = async (albumId: string, masterKey: Uint8Array) => {
+    albumKeysRef.current[albumId] = masterKey;
+    setAlbumKeys({ ...albumKeysRef.current });
 
-    // Broadcast to other tabs
+    // Save MasterKey to IndexedDB for instant unlock on refresh
     try {
-      const { broadcastUnlock } = await import('@/lib/crypto/unlock');
-      broadcastUnlock(albumId, key);
-    } catch (e) {
-      console.error("Failed to broadcast unlock", e);
+      const { saveMasterKey } = await import('@/lib/crypto/keyStore');
+      await saveMasterKey(albumId, masterKey);
+      console.log(`[AuthContext] MasterKey saved to IDB for instant unlock`);
+    } catch (err) {
+      console.error('[AuthContext] Failed to save MasterKey to IDB:', err);
     }
+
+    // Broadcast unlock
+    const { broadcastUnlock } = await import('@/lib/crypto/unlock');
+    broadcastUnlock(albumId, masterKey);
   };
 
   const lockAlbum = (albumId: string) => {
@@ -222,7 +228,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     }
 
-    // 2. Try DeviceKey path (fast path - hardware-bound security)
+    // 2. FASTEST PATH: Check IndexedDB for plain MasterKey (no Drive token needed!)
+    try {
+      console.log(`[AuthContext] Checking IndexedDB for MasterKey: ${albumId}`);
+      const { getMasterKey } = await import('@/lib/crypto/keyStore');
+      const masterKey = await getMasterKey(albumId);
+
+      if (masterKey) {
+        console.log(`[AuthContext] MasterKey found in IDB, unlocking instantly!`);
+        unlockAlbum(albumId, masterKey);
+        return true;
+      } else {
+        console.log(`[AuthContext] No MasterKey in IDB for ${albumId}`);
+      }
+    } catch (e) {
+      console.error("[AuthContext] IDB MasterKey check failed:", e);
+    }
+
+    // 3. Try DeviceKey path (hardware-bound security)
     try {
       console.log(`[AuthContext] Checking IndexedDB for DeviceKey: ${albumId}`);
       const { getDeviceKey } = await import('@/lib/crypto/keyStore');
@@ -232,7 +255,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (deviceKey) {
         console.log(`[AuthContext] DeviceKey found in IndexedDB for ${albumId}`);
 
-        // 3. We have a Device Key (Authorized Device). Fetch Encryption Blob from Drive.
+        // 4. We have a Device Key (Authorized Device). Fetch Encryption Blob from Drive.
         let token = googleAccessToken;
         if (!token) {
           console.log(`[AuthContext] No Google token, attempting refresh...`);
@@ -243,7 +266,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return false;
         }
 
-        // 4. Fetch Blob
+        // 5. Fetch Blob
         console.log(`[AuthContext] Fetching Drive blob for album ${albumId}`);
         const { fetchDriveBlob } = await import('@/services/driveService');
         const filename = `famoria_album_${albumId}.key`;
@@ -255,7 +278,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
           console.log(`[AuthContext] Drive blob fetched successfully`);
 
-          // 5. Unwrap
+          // 6. Unwrap
           console.log(`[AuthContext] Unwrapping Master Key using DeviceKey...`);
           const masterKey = await unwrapMasterKeyWithDevice(
             albumId,
@@ -279,7 +302,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error("[AuthContext] DeviceKey path failed:", e);
     }
 
-    // 3. Drive Fallback Path - Fetch plain MasterKey directly
+    // 4. Drive Fallback Path - Fetch plain MasterKey directly
     console.log(`[AuthContext] Attempting Drive fallback to fetch plain MasterKey...`);
     try {
       let token = googleAccessToken;
