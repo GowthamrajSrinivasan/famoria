@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2, Loader2 } from 'lucide-react';
-import { Photo, User } from '../types';
+import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Photo, Post, User } from '../types';
 import { CommentSection } from './CommentSection';
 import { LikeButton } from './LikeButton';
 import { EditPhotoModal } from './EditPhotoModal';
@@ -8,11 +8,16 @@ import { photoService } from '../services/photoService';
 import { useAuth } from '../context/AuthContext';
 
 interface PhotoLightboxProps {
-  photo: Photo;
+  photo: Photo | Post; // Accept both Photo and Post
   currentUser: User | null;
   onClose: () => void;
-  onPhotoUpdate?: (photo: Photo) => void; // Optional callback if we want to update the feed immediately
-  onPhotoDelete?: () => void; // Optional callback after successful deletion
+  onPhotoUpdate?: (photo: Photo) => void;
+  onPhotoDelete?: () => void;
+}
+
+// Type guard
+function isPost(item: Photo | Post): item is Post {
+  return 'photoIds' in item && Array.isArray((item as Post).photoIds);
 }
 
 export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser, onClose, onPhotoUpdate, onPhotoDelete }) => {
@@ -22,149 +27,173 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
   const [isDeleting, setIsDeleting] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
-  // Full-resolution image state
-  const [fullResUrl, setFullResUrl] = useState<string>(photo.url);
+  // Carousel state for posts
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [displayUrls, setDisplayUrls] = useState<string[]>([]);
   const [isDecryptingFullRes, setIsDecryptingFullRes] = useState(false);
 
-  // Decrypt full-resolution image for encrypted photos
+  const post = isPost(photo) ? photo : null;
+  const photoCount = post ? post.photoIds.length : 1;
+
+  // Decrypt images (single photo or multiple for post)
   useEffect(() => {
+    setCurrentImageIndex(0);
+    setDisplayUrls([]);
+    setIsDecryptingFullRes(false);
+
     if (!photo.isEncrypted || !photo.albumId) {
-      setFullResUrl(photo.url);
+      setDisplayUrls([photo.url || '']);
       return;
     }
 
     const albumKey = getAlbumKey(photo.albumId);
     if (!albumKey) {
-      // Album locked - show thumbnail
-      setFullResUrl(photo.url);
+      setDisplayUrls([photo.url || '']);
       return;
     }
 
-    const decryptFullResImage = async () => {
+    const decryptImages = async () => {
       setIsDecryptingFullRes(true);
       try {
         const { cacheService } = await import('../services/cacheService');
         const { storageService } = await import('../services/storageService');
+        const { photoService } = await import('../services/photoService');
 
-        const photoId = photo.albumPhotoId || photo.id;
+        if (post) {
+          // Multi-image post
+          console.log(`[PhotoLightbox] Decrypting post ${post.id} with ${post.photoIds.length} photos`);
 
-        // Check cache for full-res image
-        let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'full');
+          const urls: string[] = [];
+          const postPhotos = await photoService.getPostPhotos(photo.albumId!, post.id);
 
-        if (imageBlob) {
-          console.log(`[PhotoLightbox] Cache hit for full-res ${photoId}`);
-          setFullResUrl(URL.createObjectURL(imageBlob));
+          for (let i = 0; i < postPhotos.length; i++) {
+            const photoData = postPhotos[i];
+            const photoId = photoData.id;
+
+            // Check cache for full-res
+            let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'full');
+
+            if (!imageBlob) {
+              const photoKeyModule = await import('../lib/crypto/photoKey');
+              const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+
+              const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
+              const pathToLoad = photoData.encryptedPath;
+
+              if (pathToLoad) {
+                const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+                imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+                await cacheService.setCachedDecryptedPhoto(photoId, photo.albumId!, imageBlob, 'full');
+              }
+            }
+
+            if (imageBlob) {
+              urls.push(URL.createObjectURL(imageBlob));
+            }
+          }
+
+          setDisplayUrls(urls);
+          console.log(`[PhotoLightbox] Post decrypted: ${urls.length} full-res images`);
         } else {
-          console.log(`[PhotoLightbox] Cache miss for ${photoId}, decrypting full-res...`);
+          // Single photo
+          const photoId = (photo as any).albumPhotoId || photo.id;
+          let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'full');
 
-          // Import crypto modules
-          const photoKeyModule = await import('../lib/crypto/photoKey');
-          const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+          if (!imageBlob) {
+            const { collection, query, where, getDocs } = await import('firebase/firestore');
+            const { db } = await import('../lib/firebase');
 
-          // Fetch photo document from album subcollection
-          const { collection, query, where, getDocs } = await import('firebase/firestore');
-          const { db } = await import('../lib/firebase');
+            const photoQuery = query(
+              collection(db, 'albums', photo.albumId, 'photos'),
+              where('__name__', '==', photoId)
+            );
+            const snapshot = await getDocs(photoQuery);
 
-          const photoQuery = query(
-            collection(db, 'albums', photo.albumId, 'photos'),
-            where('__name__', '==', photoId)
-          );
-          const snapshot = await getDocs(photoQuery);
+            if (!snapshot.empty) {
+              const photoDoc = snapshot.docs[0].data();
+              const actualPhotoId = photoDoc.id;
 
-          if (snapshot.empty) {
-            console.error(`[PhotoLightbox] Photo ${photoId} not found in album ${photo.albumId}`);
-            return;
+              const photoKeyModule = await import('../lib/crypto/photoKey');
+              const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+              const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
+
+              const pathToLoad = photoDoc.encryptedPath;
+              if (pathToLoad) {
+                const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+                imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+                await cacheService.setCachedDecryptedPhoto(actualPhotoId, photo.albumId, imageBlob, 'full');
+              }
+            }
           }
 
-          const photoDoc = snapshot.docs[0].data();
-
-          // Use actual UUID from photoDoc.id for key derivation
-          const actualPhotoId = photoDoc.id;
-          console.log(`[PhotoLightbox] Decrypting full-res with photoId: ${actualPhotoId}`);
-
-          // Derive photo key
-          const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
-
-          // Use FULL encryptedPath (not thumbnailPath!)
-          const pathToLoad = photoDoc.encryptedPath;
-
-          if (!pathToLoad) {
-            console.error(`[PhotoLightbox] No encryptedPath found for photo ${photoId}`);
-            return;
+          if (imageBlob) {
+            setDisplayUrls([URL.createObjectURL(imageBlob)]);
           }
-
-          console.log(`[PhotoLightbox] Loading full-res encrypted blob from: ${pathToLoad}`);
-          const encryptedBlob = await storageService.downloadBlob(pathToLoad);
-          console.log(`[PhotoLightbox] Blob downloaded, size: ${encryptedBlob.size}, decrypting...`);
-
-          imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
-          const decryptedUrl = URL.createObjectURL(imageBlob);
-          setFullResUrl(decryptedUrl);
-
-          // Cache the decrypted full-res image
-          await cacheService.setCachedDecryptedPhoto(actualPhotoId, photo.albumId, imageBlob, 'full');
-          console.log(`[PhotoLightbox] Full-res image decrypted and cached successfully`);
         }
       } catch (err) {
-        console.error('[PhotoLightbox] Failed to decrypt full-res image:', err);
-        // Fallback to thumbnail
-        setFullResUrl(photo.url);
+        console.error('[PhotoLightbox] Failed to decrypt:', err);
+        setDisplayUrls([photo.url || '']);
       } finally {
         setIsDecryptingFullRes(false);
       }
     };
 
-    decryptFullResImage();
-  }, [photo.isEncrypted, photo.albumId, photo.id, photo.albumPhotoId, photo.url, getAlbumKey]);
+    decryptImages();
+  }, [photo.id, photo.isEncrypted, photo.albumId, getAlbumKey]);
 
-  // Close on Escape key
+  // Close on Escape, navigate with arrow keys
   useEffect(() => {
-
-    const handleEsc = (e: KeyboardEvent) => {
+    const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !showEditModal) onClose();
+      if (photoCount > 1) {
+        if (e.key === 'ArrowLeft') handlePrevImage();
+        if (e.key === 'ArrowRight') handleNextImage();
+      }
     };
-    window.addEventListener('keydown', handleEsc);
-    document.body.style.overflow = 'hidden'; // Lock scroll
+    window.addEventListener('keydown', handleKey);
+    document.body.style.overflow = 'hidden';
     return () => {
-      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('keydown', handleKey);
       document.body.style.overflow = 'unset';
     };
-  }, [onClose, showEditModal]);
+  }, [onClose, showEditModal, currentImageIndex, photoCount]);
+
+  const handlePrevImage = () => {
+    setCurrentImageIndex((prev) => (prev === 0 ? photoCount - 1 : prev - 1));
+  };
+
+  const handleNextImage = () => {
+    setCurrentImageIndex((prev) => (prev === photoCount - 1 ? 0 : prev + 1));
+  };
 
   const handleEditSave = (newPhoto: Photo) => {
-    if (onPhotoUpdate) {
-      onPhotoUpdate(newPhoto);
-    }
-    // Close edit modal, keep lightbox open? Or close all?
-    // Let's close edit modal and switch lightbox to new photo if we were passing state up, 
-    // but for now, we'll just close the edit modal.
+    if (onPhotoUpdate) onPhotoUpdate(newPhoto);
     setShowEditModal(false);
-    onClose(); // Close lightbox to return to feed where new photo should be
+    onClose();
   };
 
   const handleDelete = async () => {
     if (!photo.albumId) {
-      alert('Cannot delete photo: Album information missing');
+      alert('Cannot delete: Album information missing');
       return;
     }
 
     setIsDeleting(true);
     try {
-      // Get encryptedPath from photo data if available
-      const encryptedPath = (photo as any).encryptedPath;
+      if (post) {
+        // Delete entire post
+        await photoService.deletePost(post.id, photo.albumId, post.photoIds);
+      } else {
+        // Delete single photo
+        const encryptedPath = (photo as any).encryptedPath;
+        await photoService.deletePhotoCompletely(photo.albumId, photo.id, encryptedPath);
+      }
 
-      await photoService.deletePhotoCompletely(
-        photo.albumId,
-        photo.id,
-        encryptedPath
-      );
-
-      // Notify parent and close
       if (onPhotoDelete) onPhotoDelete();
       onClose();
     } catch (error) {
-      console.error('Failed to delete photo:', error);
-      alert('Failed to delete photo. Please try again.');
+      console.error('Failed to delete:', error);
+      alert('Failed to delete. Please try again.');
       setIsDeleting(false);
       setShowDeleteConfirm(false);
     }
@@ -173,7 +202,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
   if (showEditModal) {
     return (
       <EditPhotoModal
-        photo={photo}
+        photo={post ? { ...photo, id: post.coverPhotoId } as Photo : photo as Photo}
         onClose={() => setShowEditModal(false)}
         onSave={handleEditSave}
       />
@@ -191,7 +220,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
 
       <div className="w-full max-w-6xl h-full max-h-[90vh] bg-white rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row">
 
-        {/* Image Section - Darker background for focus */}
+        {/* Image Section */}
         <div className="flex-1 bg-black flex items-center justify-center relative group">
           {isDecryptingFullRes && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
@@ -201,11 +230,54 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
               </div>
             </div>
           )}
-          <img
-            src={fullResUrl}
-            alt={photo.caption}
-            className="max-w-full max-h-[50vh] md:max-h-full object-contain"
-          />
+
+          {displayUrls.length > 0 && (
+            <>
+              <img
+                src={displayUrls[currentImageIndex]}
+                alt={photo.caption}
+                className="max-w-full max-h-[50vh] md:max-h-full object-contain"
+              />
+
+              {/* Multi-image controls */}
+              {photoCount > 1 && (
+                <>
+                  {/* Navigation arrows */}
+                  <button
+                    onClick={handlePrevImage}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white p-3 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                  >
+                    <ChevronLeft size={24} className="text-stone-800" />
+                  </button>
+                  <button
+                    onClick={handleNextImage}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/90 hover:bg-white p-3 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                  >
+                    <ChevronRight size={24} className="text-stone-800" />
+                  </button>
+
+                  {/* Image counter */}
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 text-white text-sm px-3 py-1.5 rounded-full font-bold backdrop-blur-sm">
+                    {currentImageIndex + 1} / {photoCount}
+                  </div>
+
+                  {/* Pagination dots */}
+                  <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2">
+                    {Array.from({ length: Math.min(photoCount, 10) }).map((_, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setCurrentImageIndex(idx)}
+                        className={`h-2 rounded-full transition-all ${idx === currentImageIndex
+                            ? 'w-8 bg-white'
+                            : 'w-2 bg-white/50 hover:bg-white/75'
+                          }`}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
 
         {/* Sidebar Section */}
@@ -227,7 +299,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                 </div>
               </div>
 
-              {/* More Menu - Only for photo owner */}
+              {/* More Menu - Only for owner */}
               {currentUser?.id === photo.authorId && (
                 <div className="relative">
                   <button
@@ -239,13 +311,10 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
 
                   {showMenu && (
                     <>
-                      {/* Backdrop */}
                       <div
                         className="fixed inset-0 z-10"
                         onClick={() => setShowMenu(false)}
                       />
-
-                      {/* Menu */}
                       <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-stone-100 py-1 min-w-[140px] z-20 animate-fade-in-up">
                         <button
                           onClick={() => {
@@ -255,7 +324,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                           className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
                         >
                           <Trash2 size={14} />
-                          <span>Delete Photo</span>
+                          <span>{post ? 'Delete Post' : 'Delete Photo'}</span>
                         </button>
                       </div>
                     </>
@@ -272,7 +341,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                   #{tag}
                 </span>
               ))}
-              {photo.isAiGenerated && (
+              {(photo as any).isAiGenerated && (
                 <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded-md border border-purple-100 flex items-center gap-1">
                   <Sparkles size={10} /> AI Edited
                 </span>
@@ -287,14 +356,16 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                 </button>
               </div>
 
-              {/* Edit Button */}
-              <button
-                onClick={() => setShowEditModal(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-full bg-stone-900 text-white shadow-md hover:bg-stone-700 hover:shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-              >
-                <Sparkles size={16} className="text-orange-300" />
-                <span className="text-sm font-medium">Edit with AI</span>
-              </button>
+              {/* Edit Button - only for single photos */}
+              {!post && (
+                <button
+                  onClick={() => setShowEditModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-full bg-stone-900 text-white shadow-md hover:bg-stone-700 hover:shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+                >
+                  <Sparkles size={16} className="text-orange-300" />
+                  <span className="text-sm font-medium">Edit with AI</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -310,9 +381,12 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
       {showDeleteConfirm && (
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-10 rounded-3xl">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-fade-in-up">
-            <h3 className="text-xl font-bold text-stone-800 mb-2">Delete Photo?</h3>
+            <h3 className="text-xl font-bold text-stone-800 mb-2">{post ? 'Delete Post?' : 'Delete Photo?'}</h3>
             <p className="text-stone-600 mb-6">
-              This will permanently delete this photo from your album and the family feed. This action cannot be undone.
+              {post
+                ? `This will permanently delete this post and all ${photoCount} photos from your album and the family feed.`
+                : 'This will permanently delete this photo from your album and the family feed.'
+              } This action cannot be undone.
             </p>
             <div className="flex gap-3">
               <button
