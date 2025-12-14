@@ -45,7 +45,7 @@ interface ValidationError {
 }
 
 export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, currentAlbumId }) => {
-  const { user, getAlbumKey, unlockAlbum } = useAuth();
+  const { user, getAlbumKey, unlockAlbum, googleAccessToken, refreshDriveToken } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [filesToUpload, setFilesToUpload] = useState<File[]>([]); // Changed to array
   const [previews, setPreviews] = useState<string[]>([]); // Array of preview URLs
@@ -59,6 +59,13 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
   // Album Selection State
   const [albums, setAlbums] = useState<Album[]>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>(currentAlbumId || '');
+
+  // Inline Album Creation State
+  const [showCreateAlbum, setShowCreateAlbum] = useState(false);
+  const [newAlbumName, setNewAlbumName] = useState('');
+  const [newAlbumDescription, setNewAlbumDescription] = useState('');
+  const [newAlbumPrivacy, setNewAlbumPrivacy] = useState<'private' | 'family' | 'public'>('family');
+  const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
 
   // Unlock State
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -158,6 +165,11 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       reader.readAsDataURL(file);
     });
 
+    // Clear the file input so the same files can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
     // Run AI analysis once all files are added
     if (newFiles.length > 0 && !isAnalyzing) {
       setTimeout(() => runAIAnalysis(newFiles), 100);
@@ -245,6 +257,104 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     // Optional: Auto-retry upload?
     // For now, let user click "Save" again to be safe/clear.
   };
+
+  const handleCreateAlbum = async () => {
+    if (!newAlbumName.trim() || !user) {
+      setValidationError({
+        title: 'Album Name Required',
+        message: 'Please enter a name for your new album.',
+        suggestion: 'Album names must be between 1 and 50 characters.'
+      });
+      return;
+    }
+
+    setIsCreatingAlbum(true);
+    try {
+      // 1. Get Google Drive access token
+      let token = googleAccessToken;
+      if (!token) {
+        token = await refreshDriveToken();
+        if (!token) throw new Error("Google Drive access required for secure storage.");
+      }
+
+      // 2. Generate Master Key (Raw Bytes) - 32 bytes CSPRNG
+      const masterKey = crypto.getRandomValues(new Uint8Array(32));
+      const masterKeyId = crypto.randomUUID();
+
+      // Helper: Convert to Base64
+      const toBase64 = (u8: Uint8Array) => btoa(String.fromCharCode(...u8));
+
+      // 3. Generate Hardware DeviceKey & Store in IndexedDB
+      const { generateAndStoreDeviceKey, wrapMasterKeyForDevice } = await import('@/lib/crypto/deviceKey');
+      const deviceKey = await generateAndStoreDeviceKey(masterKeyId);
+
+      // 4. Create TWO versions of MK for Drive:
+      const plainMasterKeyB64 = toBase64(masterKey);
+      const { encryptedMasterKey, iv, authTag } = await wrapMasterKeyForDevice(masterKey, deviceKey);
+
+      // 5. Construct Drive Blob (V4 Format with BOTH layers)
+      const driveBlob = {
+        version: 4,
+        masterKeyId,
+        recoveryKey: plainMasterKeyB64,
+        encryptedMasterKey,
+        iv,
+        authTag,
+        createdAt: Date.now()
+      };
+
+      // 6. Upload to Drive
+      const { uploadDriveAppDataFile } = await import('@/services/driveService');
+      const filename = `famoria_album_${masterKeyId}.key`;
+      await uploadDriveAppDataFile(filename, JSON.stringify(driveBlob), token!);
+
+      // 7. Create Album in Firestore
+      const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('../lib/firebase');
+      const albumId = masterKeyId;
+      await setDoc(doc(db, 'albums', albumId), {
+        id: albumId,
+        name: newAlbumName.trim(),
+        description: newAlbumDescription.trim(),
+        privacy: newAlbumPrivacy,
+        createdBy: user.id,
+        userId: user.id,
+        members: [user.id],
+        masterKeyId: masterKeyId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        coverPhoto: null,
+        photoCount: 0
+      });
+
+      console.log(`[Uploader] Created new album: ${albumId}`);
+
+      // 8. Unlock locally (Add to Keyring)
+      unlockAlbum(albumId, masterKey);
+
+      // 9. Select the new album
+      setSelectedAlbumId(albumId);
+
+      // 10. Reset inline form
+      setShowCreateAlbum(false);
+      setNewAlbumName('');
+      setNewAlbumDescription('');
+      setNewAlbumPrivacy('family');
+
+      // The albums list will update automatically via the subscription
+    } catch (error: any) {
+      console.error('[Uploader] Failed to create album:', error);
+      setValidationError({
+        title: 'Album Creation Failed',
+        message: error.message || 'Could not create the album.',
+        suggestion: 'Please try again or select an existing album.'
+      });
+    } finally {
+      setIsCreatingAlbum(false);
+    }
+  };
+
+
 
   const handleSave = async () => {
     if (filesToUpload.length === 0 || !analysis || !user || !onUploadComplete) return;
@@ -432,6 +542,16 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         </div>
 
         <div className="p-8">
+          {/* Hidden file input that persists for "Add More" functionality */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,image/webp"
+            multiple
+            onChange={(e) => e.target.files && e.target.files.length > 0 && handleFiles(e.target.files)}
+          />
+
           {filesToUpload.length === 0 ? (
             <>
               <div
@@ -444,14 +564,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
               >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  className="hidden"
-                  accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,image/webp"
-                  multiple
-                  onChange={(e) => e.target.files && e.target.files.length > 0 && handleFiles(e.target.files)}
-                />
+                {/* File input removed - now using persistent input at top of component */}
                 <div className="w-20 h-20 bg-white shadow-sm rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
                   <Upload size={32} className="text-orange-400" />
                 </div>
@@ -594,19 +707,110 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                               <ImageIcon size={16} />
                             </div>
                             <select
-                              value={selectedAlbumId}
-                              onChange={(e) => setSelectedAlbumId(e.target.value)}
+                              value={showCreateAlbum ? 'CREATE_NEW' : selectedAlbumId}
+                              onChange={(e) => {
+                                if (e.target.value === 'CREATE_NEW') {
+                                  setShowCreateAlbum(true);
+                                  setSelectedAlbumId('');
+                                } else {
+                                  setShowCreateAlbum(false);
+                                  setSelectedAlbumId(e.target.value);
+                                }
+                              }}
                               className="appearance-none w-full bg-stone-50 border border-stone-200 text-stone-700 py-3 pl-10 pr-10 rounded-xl focus:ring-2 focus:ring-orange-200 focus:border-orange-300 transition-all font-semibold text-sm cursor-pointer"
                             >
                               <option value="" disabled>Select an Album</option>
                               {albums.map(album => (
                                 <option key={album.id} value={album.id}>{album.name}</option>
                               ))}
+                              <option value="CREATE_NEW" className="font-bold text-orange-600">+ Create New Album</option>
                             </select>
                             <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-stone-400">
                               <ChevronDown size={16} />
                             </div>
                           </div>
+
+                          {/* Inline Album Creation Form */}
+                          {showCreateAlbum && (
+                            <div className="mt-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl space-y-3 animate-fade-in-up">
+                              <h4 className="text-sm font-bold text-blue-900 flex items-center gap-2">
+                                <Plus size={16} />
+                                Create New Album
+                              </h4>
+
+                              <div>
+                                <input
+                                  type="text"
+                                  value={newAlbumName}
+                                  onChange={(e) => setNewAlbumName(e.target.value)}
+                                  placeholder="Album name (required)"
+                                  className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-300 outline-none"
+                                  maxLength={50}
+                                />
+                              </div>
+
+                              <div>
+                                <textarea
+                                  value={newAlbumDescription}
+                                  onChange={(e) => setNewAlbumDescription(e.target.value)}
+                                  placeholder="Description (optional)"
+                                  className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-300 outline-none resize-none"
+                                  rows={2}
+                                  maxLength={500}
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-semibold text-blue-900 mb-1.5">Privacy</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                  {[
+                                    { value: 'private', label: 'Private' },
+                                    { value: 'family', label: 'Family' },
+                                    { value: 'public', label: 'Public' }
+                                  ].map((opt) => (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      onClick={() => setNewAlbumPrivacy(opt.value as any)}
+                                      className={`px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${newAlbumPrivacy === opt.value
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-white text-blue-700 hover:bg-blue-100'
+                                        }`}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="flex gap-2 pt-1">
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => {
+                                    setShowCreateAlbum(false);
+                                    setNewAlbumName('');
+                                    setNewAlbumDescription('');
+                                    setNewAlbumPrivacy('family');
+                                  }}
+                                  className="flex-1 text-xs"
+                                  disabled={isCreatingAlbum}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={handleCreateAlbum}
+                                  className="flex-1 text-xs"
+                                  disabled={!newAlbumName.trim() || isCreatingAlbum}
+                                  isLoading={isCreatingAlbum}
+                                >
+                                  Create Album
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
                           {isAnalyzing && (
                             <p className="text-xs text-stone-400 mt-2 ml-1">
                               AI Suggested: <span className="text-stone-600 font-medium">{analysis.album}</span>
