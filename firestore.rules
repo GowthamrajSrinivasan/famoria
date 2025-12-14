@@ -45,6 +45,43 @@ service cloud.firestore {
       }
     }
 
+    // Posts - multi-image posts collection
+    match /posts/{postId} {
+      // Anyone authenticated can read posts (for feed)
+      allow read: if request.auth != null;
+
+      // Only authenticated users can create posts
+      allow create: if request.auth != null &&
+                       request.auth.uid == request.resource.data.authorId;
+
+      // Users can update posts for interactions (likes, comment counts)
+      // OR if they own the post
+      allow update: if request.auth != null && (
+        // Owner can update anything
+        request.auth.uid == resource.data.authorId ||
+        // Anyone can update likes array and commentsCount for interactions
+        (request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['likes', 'commentsCount']))
+      );
+
+      // Only owner can delete
+      allow delete: if request.auth != null &&
+                       request.auth.uid == resource.data.authorId;
+
+      // Comments subcollection for posts
+      match /comments/{commentId} {
+        // Anyone authenticated can read comments
+        allow read: if request.auth != null;
+
+        // Authenticated users can add comments
+        allow create: if request.auth != null;
+
+        // Only comment author can delete their comment
+        allow delete: if request.auth != null &&
+                         request.auth.uid == resource.data.userId;
+      }
+    }
+
     // Albums - users can read/write their own albums
     match /albums/{albumId} {
       // READ: Allow if user is owner (createdBy/userId) or in members list

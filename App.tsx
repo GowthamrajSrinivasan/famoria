@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Camera, Plus, Search, LogOut, Grid, Image as ImageIcon, FolderOpen } from 'lucide-react';
-import { Photo, ViewState, Album } from './types';
+import { Photo, Post, ViewState, Album } from './types';
 import { PhotoCard } from './components/PhotoCard';
 import { Uploader } from './components/Uploader';
 import { PhotoLightbox } from './components/PhotoLightbox';
@@ -17,9 +17,9 @@ function ProtectedApp() {
   useAutoLock(); // Initialize auto-lock
   const { user, loading, signOut } = useAuth();
   const [view, setView] = useState<ViewState>(ViewState.GALLERY);
-  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredPhotos, setFilteredPhotos] = useState<Photo[]>([]);
+  const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
 
   // Album state
@@ -27,12 +27,12 @@ function ProtectedApp() {
   const [editAlbum, setEditAlbum] = useState<Album | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
 
-  // Subscribe to real-time feed
+  // Subscribe to real-time posts feed
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = photoService.subscribeToFeed(user.id, (newPhotos) => {
-      setPhotos(newPhotos);
+    const unsubscribe = photoService.subscribeToPostsFeed(user.id, (newPosts) => {
+      setPosts(newPosts);
     });
 
     return () => unsubscribe();
@@ -40,21 +40,21 @@ function ProtectedApp() {
 
   useEffect(() => {
     if (!searchQuery.trim()) {
-      setFilteredPhotos(photos);
+      setFilteredPosts(posts);
       return;
     }
     const query = searchQuery.toLowerCase();
-    const filtered = photos.filter(p =>
+    const filtered = posts.filter(p =>
       p.caption.toLowerCase().includes(query) ||
       p.tags.some(t => t.toLowerCase().includes(query))
     );
-    setFilteredPhotos(filtered);
-  }, [searchQuery, photos]);
+    setFilteredPosts(filtered);
+  }, [searchQuery, posts]);
 
-  const handleUploadComplete = (newPhoto: Photo) => {
-    // Optimistically add photo to state for immediate UI feedback
+  const handleUploadComplete = (newPost: Post) => {
+    // Optimistically add post to state for immediate UI feedback
     // The real-time listener will sync it properly
-    setPhotos(prevPhotos => [newPhoto, ...prevPhotos]);
+    setPosts(prevPosts => [newPost, ...prevPosts]);
     setView(ViewState.GALLERY);
   };
 
@@ -160,7 +160,7 @@ function ProtectedApp() {
               <div>
                 <h1 className="text-3xl font-bold text-stone-800 mb-2 font-serif">Family Feed</h1>
                 <p className="text-stone-500">
-                  You have <span className="font-semibold text-stone-800">{photos.length}</span> shared moments
+                  You have <span className="font-semibold text-stone-800">{posts.length}</span> shared moments
                 </p>
               </div>
               <Button
@@ -172,7 +172,7 @@ function ProtectedApp() {
               </Button>
             </div>
 
-            {filteredPhotos.length === 0 ? (
+            {filteredPosts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 text-center bg-white rounded-3xl border border-stone-100 border-dashed">
                 <div className="w-16 h-16 bg-stone-50 rounded-full flex items-center justify-center mb-4 text-stone-300">
                   <ImageIcon size={32} />
@@ -182,10 +182,10 @@ function ProtectedApp() {
               </div>
             ) : (
               <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
-                {filteredPhotos.map((photo) => (
+                {filteredPosts.map((post) => (
                   <PhotoCard
-                    key={photo.id}
-                    photo={photo}
+                    key={post.id}
+                    photo={post as any}
                     onClick={setSelectedPhoto}
                     currentUser={user}
                   />
