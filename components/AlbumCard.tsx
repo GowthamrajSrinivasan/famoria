@@ -1,6 +1,7 @@
-import React from 'react';
-import { MoreVertical, Trash2, Edit, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { MoreVertical, Trash2, Edit, Image as ImageIcon, Calendar } from 'lucide-react';
 import { Album } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 interface AlbumCardProps {
     album: Album;
@@ -9,6 +10,26 @@ interface AlbumCardProps {
     onEdit?: () => void;
     onDelete?: () => void;
 }
+
+// Helper to format relative time
+const formatRelativeTime = (timestamp: number) => {
+    const now = Date.now();
+    const diff = now - timestamp;
+
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    const weeks = Math.floor(diff / 604800000);
+    const months = Math.floor(diff / 2629800000);
+
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    if (weeks < 4) return `${weeks}w ago`;
+    if (months < 12) return `${months}mo ago`;
+    return new Date(timestamp).toLocaleDateString();
+};
 
 export const AlbumCard: React.FC<AlbumCardProps> = ({
     album,
@@ -19,6 +40,70 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
 }) => {
     const [showMenu, setShowMenu] = React.useState(false);
     const isOwner = currentUserId === album.createdBy;
+    const { getAlbumKey } = useAuth();
+
+    // Decrypt cover photo if it's encrypted
+    const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(album.coverPhoto || null);
+    const [isDecrypting, setIsDecrypting] = useState(false);
+
+    useEffect(() => {
+        // If coverPhoto looks like a Storage path (contains /) AND has coverPhotoId, it's encrypted
+        if (album.coverPhoto && album.coverPhoto.includes('/') && album.coverPhotoId) {
+            const albumKey = getAlbumKey(album.id);
+            if (!albumKey) {
+                setCoverPhotoUrl(null);
+                return;
+            }
+
+            const decryptCover = async () => {
+                setIsDecrypting(true);
+                try {
+                    const { storageService } = await import('../services/storageService');
+                    const { cacheService } = await import('../services/cacheService');
+
+                    // Try to get from cache first
+                    const cacheKey = `album_cover_${album.id}`;
+                    let imageBlob = await cacheService.getCachedDecryptedPhoto(cacheKey, 'thumbnail');
+
+                    if (!imageBlob) {
+                        // Download and decrypt with proper photo key
+                        const photoKeyModule = await import('../lib/crypto/photoKey');
+                        const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+
+                        // Derive photo key using album key + photo ID
+                        const photoKey = await photoKeyModule.derivePhotoKey(albumKey, album.coverPhotoId!);
+
+                        // Download encrypted thumbnail
+                        const encryptedBlob = await storageService.downloadBlob(album.coverPhoto!);
+
+                        // Decrypt
+                        imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+
+                        // Cache it
+                        await cacheService.setCachedDecryptedPhoto(cacheKey, album.id, imageBlob, 'thumbnail');
+                        console.log(`[AlbumCard] Decrypted and cached cover for album ${album.id}`);
+                    }
+
+                    setCoverPhotoUrl(URL.createObjectURL(imageBlob));
+                } catch (err) {
+                    console.error('[AlbumCard] Failed to decrypt cover:', err);
+                    // Show placeholder on error
+                    setCoverPhotoUrl(null);
+                } finally {
+                    setIsDecrypting(false);
+                }
+            };
+
+            decryptCover();
+        } else if (album.coverPhoto && album.coverPhoto.includes('/') && !album.coverPhotoId) {
+            // Old album with encrypted path but no photoId - can't decrypt, show placeholder
+            console.log(`[AlbumCard] Album ${album.id} has encrypted cover but no coverPhotoId, showing placeholder`);
+            setCoverPhotoUrl(null);
+        } else {
+            // Direct URL (non-encrypted) or no cover photo
+            setCoverPhotoUrl(album.coverPhoto || null);
+        }
+    }, [album.coverPhoto || '', album.coverPhotoId || '', album.id, getAlbumKey]);
 
     return (
         <div
@@ -27,9 +112,13 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
         >
             {/* Cover Photo */}
             <div className="aspect-square bg-gradient-to-br from-stone-100 to-stone-200 relative overflow-hidden">
-                {album.coverPhoto ? (
+                {isDecrypting ? (
+                    <div className="w-full h-full flex items-center justify-center">
+                        <div className="w-8 h-8 border-4 border-stone-200 border-t-orange-500 rounded-full animate-spin" />
+                    </div>
+                ) : coverPhotoUrl ? (
                     <img
-                        src={album.coverPhoto}
+                        src={coverPhotoUrl}
                         alt={album.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />
@@ -39,11 +128,19 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                     </div>
                 )}
 
-                {/* Photo Count Badge */}
+                {/* Post Count Badge */}
                 <div className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-sm text-white px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1.5">
                     <ImageIcon size={14} />
-                    <span>{album.photoCount || 0}</span>
+                    <span>{album.photoCount || 0} {(album.photoCount || 0) === 1 ? 'post' : 'posts'}</span>
                 </div>
+
+                {/* Last Updated Badge */}
+                {album.updatedAt && (
+                    <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm text-stone-700 px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1">
+                        <Calendar size={12} />
+                        <span>{formatRelativeTime(album.updatedAt)}</span>
+                    </div>
+                )}
             </div>
 
             {/* Album Info */}
