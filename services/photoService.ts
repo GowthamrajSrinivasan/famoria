@@ -306,5 +306,35 @@ export const photoService = {
       console.error(`[PhotoService] Error deleting post:`, error);
       throw error;
     }
+  },
+
+  /**
+   * Subscribe to posts in a specific album
+   * @param albumId Album ID to fetch posts from
+   * @param callback Function to call with posts array
+   * @returns Unsubscribe function
+   */
+  subscribeToAlbumPosts: (albumId: string, callback: (posts: Post[]) => void) => {
+    const q = query(
+      collection(db, POSTS_COLLECTION),
+      where('albumId', '==', albumId),
+      orderBy('createdAt', 'desc')
+    );
+
+    return onSnapshot(q, (snapshot) => {
+      const posts = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now()
+        } as Post;
+      });
+
+      console.log(`[PhotoService] Album posts updated: ${posts.length} posts`);
+      callback(posts);
+    }, (error) => {
+      console.error('Album posts subscription error:', error);
+    });
   }
 };

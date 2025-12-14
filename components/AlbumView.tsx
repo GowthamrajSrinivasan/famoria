@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Upload, Edit, Trash2, MoreVertical, Image as ImageIcon, Lock, KeyRound } from 'lucide-react';
-import { Album, Photo } from '../types';
+import { Album, Post } from '../types';
 import { PhotoCard } from './PhotoCard';
 import { photoService } from '../services/photoService';
-import { storageService } from '../services/storageService';
 import { useAuth } from '../context/AuthContext';
 import { Button } from './Button';
 import { VaultUnlockModal } from './VaultUnlockModal';
@@ -15,7 +14,7 @@ interface AlbumViewProps {
     onEdit: () => void;
     onDelete: () => void;
     onUpload: () => void;
-    onPhotoClick: (photo: Photo) => void;
+    onPhotoClick: (photo: Post) => void;
 }
 
 export const AlbumView: React.FC<AlbumViewProps> = ({
@@ -28,138 +27,40 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     onPhotoClick
 }) => {
     const { getAlbumKey, unlockAlbum, autoUnlockAlbum } = useAuth();
-    const [rawPhotos, setRawPhotos] = useState<any[]>([]); // Encrypted docs
-    const [photos, setPhotos] = useState<Photo[]>([]); // Decrypted photos
+    const [posts, setPosts] = useState<Post[]>([]);
     const [loading, setLoading] = useState(true);
     const [showMenu, setShowMenu] = useState(false);
     const [showUnlock, setShowUnlock] = useState(false);
-    const [decrypting, setDecrypting] = useState(false);
     const [checkingVault, setCheckingVault] = useState(false);
     const hasAttemptedUnlock = React.useRef(false);
 
     const isOwner = currentUserId === album.createdBy;
     const albumKey = getAlbumKey(album.id);
 
-    // 1. Fetch Raw Encrypted Data
+    // Subscribe to posts in this album
     useEffect(() => {
         setLoading(true);
-        const unsubscribe = photoService.subscribeToAlbum(album.id, (docs) => {
-            setRawPhotos(docs);
+        const unsubscribe = photoService.subscribeToAlbumPosts(album.id, (fetchedPosts) => {
+            setPosts(fetchedPosts);
             setLoading(false);
         });
         return () => unsubscribe();
     }, [album.id]);
 
-    // 2. Auto-Unlock & Decryption Pipeline
+    // Auto-unlock on mount if locked
     useEffect(() => {
-        // A. If Locked, Try Auto-Unlock (V4 Hardware Key)
-        if (!albumKey) {
-            setPhotos([]); // Clear photos if locked
+        if (!albumKey && !hasAttemptedUnlock.current && !checkingVault) {
+            hasAttemptedUnlock.current = true;
 
-            // Only attempt unlock ONCE per mount
-            if (!hasAttemptedUnlock.current && !checkingVault) {
-                hasAttemptedUnlock.current = true; // Set BEFORE async call
-
-                const attemptUnlock = async () => {
-                    console.log(`[V4 Auto-Unlock] Attempting auto-unlock for album: ${album.id}`);
-                    setCheckingVault(true);
-                    const success = await autoUnlockAlbum(album.id);
-                    if (!success) {
-                        console.log(`[V4 Auto-Unlock] Failed - no DeviceKey in IndexedDB or Drive blob missing`);
-                    } else {
-                        console.log(`[V4 Auto-Unlock] Success - album unlocked`);
-                    }
-                    setCheckingVault(false);
-                };
-                attemptUnlock();
-            }
-            return;
+            const attemptUnlock = async () => {
+                console.log(`[AlbumView] Attempting auto-unlock for album: ${album.id}`);
+                setCheckingVault(true);
+                const success = await autoUnlockAlbum(album.id);
+                setCheckingVault(false);
+            };
+            attemptUnlock();
         }
-
-        // B. If Unlocked, Decrypt Photos
-        const decryptPhotos = async () => {
-            setDecrypting(true);
-            try {
-                // Dynamically import crypto modules to avoid bloating main bundle
-                const photoKeyModule = await import('../lib/crypto/photoKey');
-                const photoCryptoModule = await import('../lib/crypto/photoCrypto');
-                const { cacheService } = await import('../services/cacheService');
-
-                const decrypted = await Promise.all(rawPhotos.map(async (doc) => {
-                    try {
-                        const photoId = doc.id;
-
-                        // Derive Key (needed for both cache miss and metadata)
-                        const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
-
-                        // A. Check cache first (thumbnail)
-                        let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
-                        let imageUrl: string;
-
-                        if (imageBlob) {
-                            console.log(`[AlbumView] Cache hit for thumbnail ${photoId}`);
-                            imageUrl = URL.createObjectURL(imageBlob);
-                        } else {
-                            // B. Cache miss - decrypt thumbnail
-                            console.log(`[AlbumView] Cache miss for ${photoId}, decrypting thumbnail...`);
-
-                            // Determine path - use thumbnail if available, fallback to full
-                            const pathToLoad = doc.thumbnailPath || doc.encryptedPath;
-                            if (!pathToLoad) throw new Error("Missing file path");
-
-                            // Download and decrypt
-                            const encryptedBlob = await storageService.downloadBlob(pathToLoad);
-                            imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
-                            imageUrl = URL.createObjectURL(imageBlob);
-
-                            // Cache the decrypted thumbnail
-                            await cacheService.setCachedDecryptedPhoto(photoId, album.id, imageBlob, 'thumbnail');
-                        }
-
-                        // C. Decrypt Metadata (always decrypt metadata, it's small)
-                        const metadata = await photoCryptoModule.decryptMetadata(
-                            {
-                                encrypted: doc.encryptedMetadata,
-                                iv: doc.metadataIv,
-                                authTag: doc.metadataAuthTag,
-                                photoIv: doc.photoIv
-                            },
-                            photoKey
-                        );
-
-                        return {
-                            id: photoId,
-                            url: imageUrl,
-                            caption: metadata.caption,
-                            tags: metadata.tags || [],
-                            date: new Date(metadata.date).toLocaleDateString(),
-                            author: metadata.author,
-                            authorId: metadata.authorId,
-                            isEncrypted: true,
-                            likes: doc.likes || [],
-                            commentsCount: doc.commentsCount || 0
-                        } as Photo;
-                    } catch (err) {
-                        console.error(`Failed to decrypt photo ${doc.id}:`, err);
-                        return null;
-                    }
-                }));
-
-                setPhotos(decrypted.filter(p => p !== null) as Photo[]);
-            } catch (err) {
-                console.error("Critical decryption failure:", err);
-            } finally {
-                setDecrypting(false);
-            }
-        };
-
-        if (rawPhotos.length > 0) {
-            decryptPhotos();
-        } else {
-            // Even if empty, we are unlocked
-        }
-
-    }, [rawPhotos, albumKey]); // Re-run if data changes or key changes
+    }, [albumKey, album.id]);
 
     const handleUnlockSuccess = (key: Uint8Array) => {
         unlockAlbum(album.id, key);
@@ -187,7 +88,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                         <div className="flex items-center gap-3 text-sm text-stone-500">
                             <span className="flex items-center gap-1.5">
                                 <ImageIcon size={16} />
-                                {photos.length} photos
+                                {posts.length} {posts.length === 1 ? 'post' : 'posts'}
                             </span>
                             <span>•</span>
                             <span className="capitalize">{album.privacy}</span>
@@ -286,12 +187,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                         </Button>
                     </div>
                 )
-            ) : decrypting ? (
-                <div className="flex flex-col items-center justify-center h-64">
-                    <div className="w-12 h-12 border-4 border-stone-200 border-t-teal-500 rounded-full animate-spin mb-4" />
-                    <p className="text-stone-500 font-medium animate-pulse">Decrypting memories...</p>
-                </div>
-            ) : photos.length === 0 ? (
+            ) : posts.length === 0 ? (
                 <div className="text-center py-20">
                     <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
                         <ImageIcon size={40} className="text-stone-300" />
@@ -308,11 +204,11 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                 </div>
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-fade-in-up">
-                    {photos.map((photo) => (
+                    {posts.map((post) => (
                         <PhotoCard
-                            key={photo.id}
-                            photo={photo}
-                            onClick={() => onPhotoClick(photo)}
+                            key={post.id}
+                            photo={post}
+                            onClick={() => onPhotoClick(post)}
                             currentUser={currentUserId ? { id: currentUserId } as any : null}
                         />
                     ))}

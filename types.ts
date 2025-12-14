@@ -87,7 +87,8 @@ export interface Album {
   id: string;
   name: string; // Required, max 50 chars
   description?: string; // Optional, max 500 chars
-  coverPhoto?: string; // URL to cover photo
+  coverPhoto?: string; // Storage path to cover photo thumbnail
+  coverPhotoId?: string; // ID of the photo for key derivation
   createdBy: string; // User ID
   createdAt: number; // Timestamp
   updatedAt: number; // Timestamp
