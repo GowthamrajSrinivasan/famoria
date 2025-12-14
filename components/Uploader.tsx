@@ -1,19 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, X, Image as ImageIcon, Sparkles, Check, Wand2, ChevronDown } from 'lucide-react';
+import { Upload, X, Image as ImageIcon, Sparkles, Check, Wand2, ChevronDown, GripVertical, Trash2, Plus } from 'lucide-react';
 import { Button } from './Button';
-import { analyzeImage } from '../services/geminiService';
+import { analyzeImage, analyzeMultipleImages } from '../services/geminiService';
 import { storageService } from '../services/storageService';
 import { photoService } from '../services/photoService';
 import { subscribeToAlbums } from '../services/albumService';
-import { Photo, Album } from '../types';
+import { Photo, Album, Post } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { VaultUnlockModal } from './VaultUnlockModal';
 
 interface UploaderProps {
-  onUploadComplete: (photo: Photo) => void;
+  onUploadComplete: (post: Post) => void; // Changed to Post
   onCancel: () => void;
   currentAlbumId?: string;
 }
+
+// Multi-image upload constants
+const MAX_IMAGES_PER_POST = 10;
 
 // Image validation constants for family photos
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB (accommodates DSLR JPEGs)
@@ -44,10 +47,11 @@ interface ValidationError {
 export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, currentAlbumId }) => {
   const { user, getAlbumKey, unlockAlbum } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [fileToUpload, setFileToUpload] = useState<File | null>(null);
+  const [filesToUpload, setFilesToUpload] = useState<File[]>([]); // Changed to array
+  const [previews, setPreviews] = useState<string[]>([]); // Array of preview URLs
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string>(''); // "2/5 photos uploaded"
   const [analysis, setAnalysis] = useState<{ caption: string; tags: string[]; album: string } | null>(null);
   const [validationError, setValidationError] = useState<ValidationError | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -115,54 +119,114 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     return null;
   };
 
-  const handleFile = (file: File) => {
+  const handleFiles = (files: FileList | File[]) => {
     // Clear any previous errors
     setValidationError(null);
 
-    // Validate the file
-    const error = validateFile(file);
-    if (error) {
-      setValidationError(error);
+    const filesArray = Array.from(files);
+
+    // Check total count (including existing files)
+    if (filesToUpload.length + filesArray.length > MAX_IMAGES_PER_POST) {
+      setValidationError({
+        title: 'Too Many Images',
+        message: `You can upload a maximum of ${MAX_IMAGES_PER_POST} images per post.`,
+        suggestion: `You currently have ${filesToUpload.length} image(s). You can add ${MAX_IMAGES_PER_POST - filesToUpload.length} more.`
+      });
       return;
     }
 
-    setFileToUpload(file);
+    // Validate each file
+    for (const file of filesArray) {
+      const error = validateFile(file);
+      if (error) {
+        setValidationError(error);
+        return;
+      }
+    }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target?.result as string;
-      setPreview(base64);
-      runAIAnalysis(base64);
-    };
-    reader.readAsDataURL(file);
+    // If all valid, add to state
+    const newFiles = [...filesToUpload, ...filesArray];
+    setFilesToUpload(newFiles);
+
+    // Generate previews for new files
+    filesArray.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64 = e.target?.result as string;
+        setPreviews(prev => [...prev, base64]);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Run AI analysis once all files are added
+    if (newFiles.length > 0 && !isAnalyzing) {
+      setTimeout(() => runAIAnalysis(newFiles), 100);
+    }
   };
 
-  const runAIAnalysis = async (base64: string) => {
+  const removeFile = (index: number) => {
+    const newFiles = filesToUpload.filter((_, i) => i !== index);
+    const newPreviews = previews.filter((_, i) => i !== index);
+    setFilesToUpload(newFiles);
+    setPreviews(newPreviews);
+
+    // Re-run analysis if files remain
+    if (newFiles.length > 0) {
+      runAIAnalysis(newFiles);
+    } else {
+      setAnalysis(null);
+    }
+  };
+
+  const runAIAnalysis = async (files: File[]) => {
     setIsAnalyzing(true);
     try {
-      const result = await analyzeImage(base64);
-      setAnalysis({
-        caption: result.caption,
-        tags: result.tags,
-        album: result.suggestedAlbum
-      });
+      if (files.length === 1) {
+        // Single image analysis
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const base64 = e.target?.result as string;
+          const result = await analyzeImage(base64);
+          setAnalysis({
+            caption: result.caption,
+            tags: result.tags,
+            album: result.suggestedAlbum
+          });
+          setIsAnalyzing(false);
+        };
+        reader.readAsDataURL(files[0]);
+      } else {
+        // Multi-image analysis
+        const base64Array: string[] = [];
+        const readPromises = files.map(file => {
+          return new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string);
+            reader.readAsDataURL(file);
+          });
+        });
+
+        const allBase64 = await Promise.all(readPromises);
+        const result = await analyzeMultipleImages(allBase64);
+        setAnalysis({
+          caption: result.caption,
+          tags: result.tags,
+          album: result.suggestedAlbum
+        });
+        setIsAnalyzing(false);
+      }
     } catch (error: any) {
       console.error("Analysis failed", error);
-
-      // Show user-friendly error for AI analysis failure
       setValidationError({
         title: 'AI Analysis Failed',
-        message: 'Unable to analyze your photo automatically.',
-        suggestion: 'The photo will still be uploaded, but you may need to add details manually. Try uploading a clearer photo for better results.'
+        message: 'Unable to analyze your photos automatically.',
+        suggestion: 'The photos will still be uploaded, but you may need to add details manually.'
       });
-
-      // Set default analysis so user can still upload
       setAnalysis({
-        caption: 'A beautiful family memory',
+        caption: files.length > 1 ? 'A beautiful collection of memories' : 'A beautiful family memory',
         tags: ['Family', 'Memory'],
         album: 'General'
       });
-    } finally {
       setIsAnalyzing(false);
     }
   };
@@ -170,8 +234,8 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files?.[0]) {
-      handleFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
     }
   };
 
@@ -183,11 +247,11 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
   };
 
   const handleSave = async () => {
-    if (!preview || !analysis || !fileToUpload || !user || !onUploadComplete) return;
+    if (filesToUpload.length === 0 || !analysis || !user || !onUploadComplete) return;
     if (!selectedAlbumId) {
       setValidationError({
         title: 'Album Required',
-        message: 'Please select an album to store this photo securely.',
+        message: 'Please select an album to store your photos securely.',
         suggestion: 'Choose an album from the dropdown list.'
       });
       return;
@@ -201,115 +265,140 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     }
 
     setIsUploading(true);
+    setUploadProgress('');
 
     try {
       const albumId = selectedAlbumId;
-      console.log(`[Upload] Starting upload process for album: ${albumId}`);
+      console.log(`[Upload] Starting multi-image post upload: ${filesToUpload.length} photos to album ${albumId}`);
 
-      // 1. Prepare Data
-      const photoId = crypto.randomUUID();
-      const fileName = `${Date.now()}_${photoId}.enc`;
-      const storagePath = `albums/${albumId}/photos/${fileName}`;
-      const thumbnailPath = storageService.getThumbnailPath(storagePath);
-
-      // 2. Generate Thumbnail
-      console.log(`[Upload] Generating thumbnail...`);
+      // Import utilities
       const imageUtils = await import('../lib/imageUtils');
-      const thumbnail = await imageUtils.generateThumbnail(fileToUpload, 400, 0.8);
-      console.log(`[Upload] Thumbnail generated: ${(thumbnail.size / 1024).toFixed(1)}KB (original: ${(fileToUpload.size / 1024).toFixed(1)}KB)`);
-
-      // 3. Derive Key & Encrypt Both Files
-      console.log(`[Upload] Deriving key and encrypting files...`);
       const keyModule = await import('../lib/crypto/photoKey');
       const cryptoModule = await import('../lib/crypto/photoCrypto');
 
-      const photoKey = await keyModule.derivePhotoKey(albumKey, photoId);
+      // Arrays to store photo data
+      const photoIds: string[] = [];
+      const encryptedPhotoRecords: any[] = [];
 
-      // Encrypt full image
-      const encryptedFile = await cryptoModule.encryptFile(fileToUpload, photoKey);
-      console.log(`[Upload] Full image encrypted: ${(encryptedFile.size / 1024).toFixed(1)}KB`);
+      // Process each file
+      for (let i = 0; i < filesToUpload.length; i++) {
+        const file = filesToUpload[i];
+        setUploadProgress(`${i + 1}/${filesToUpload.length} photos processed...`);
 
-      // Encrypt thumbnail
-      const thumbnailFile = new File([thumbnail], 'thumbnail.webp', { type: 'image/webp' });
-      const encryptedThumbnail = await cryptoModule.encryptFile(thumbnailFile, photoKey);
-      console.log(`[Upload] Thumbnail encrypted: ${(encryptedThumbnail.size / 1024).toFixed(1)}KB`);
+        // 1. Generate unique ID for this photo
+        const photoId = crypto.randomUUID();
+        photoIds.push(photoId);
 
-      // 4. Encrypt Metadata
-      const metadata = {
-        caption: analysis.caption,
-        tags: analysis.tags,
-        date: new Date().toISOString(),
-        author: user.name,
-        authorId: user.id
-      };
+        const fileName = `${Date.now()}_${photoId}.enc`;
+        const storagePath = `albums/${albumId}/photos/${fileName}`;
+        const thumbnailPath = storageService.getThumbnailPath(storagePath);
 
-      const encMeta = await cryptoModule.encryptMetadata(metadata, photoKey);
+        console.log(`[Upload] Processing photo ${i + 1}/${filesToUpload.length}: ${photoId}`);
 
-      // 5. Upload Both Encrypted Blobs with CDN Caching
-      console.log(`[Upload] Uploading full image to: ${storagePath}`);
-      await storageService.uploadWithCaching(encryptedFile, storagePath);
-      console.log(`[Upload] Full image uploaded`);
+        // 2. Generate Thumbnail
+        const thumbnail = await imageUtils.generateThumbnail(file, 400, 0.8);
 
-      console.log(`[Upload] Uploading thumbnail to: ${thumbnailPath}`);
-      await storageService.uploadWithCaching(encryptedThumbnail, thumbnailPath);
-      console.log(`[Upload] Thumbnail uploaded`);
+        // 3. Derive Key & Encrypt
+        const photoKey = await keyModule.derivePhotoKey(albumKey, photoId);
 
-      // 6. Save Record to Firestore (with both paths)
-      console.log(`[Upload] Creating Firestore record...`);
-      const encryptedPhotoRecord = {
-        id: photoId,
-        albumId: albumId,
-        version: 1,
-        createdAt: Date.now(),
+        // Encrypt full image
+        const encryptedFile = await cryptoModule.encryptFile(file, photoKey);
 
-        encryptedPath: storagePath,
-        thumbnailPath: thumbnailPath, // NEW: Store thumbnail path
+        // Encrypt thumbnail
+        const thumbnailFile = new File([thumbnail], 'thumbnail.webp', { type: 'image/webp' });
+        const encryptedThumbnail = await cryptoModule.encryptFile(thumbnailFile, photoKey);
 
-        encryptedMetadata: encMeta.encrypted,
-        metadataIv: encMeta.iv,
-        metadataAuthTag: encMeta.authTag,
-
-        photoIv: encMeta.photoIv || "",
-
-        authorId: user.id
-      };
-
-      const savedPhoto = await photoService.addPhotoWithDualWrite(
-        albumId,
-        encryptedPhotoRecord,
-        {
+        // 4. Encrypt Metadata (same for all photos in post)
+        const metadata = {
           caption: analysis.caption,
           tags: analysis.tags,
+          date: new Date().toISOString(),
           author: user.name,
           authorId: user.id
-        }
-      );
-      console.log(`[Upload] Firestore record created: ${savedPhoto.id}`);
+        };
+        const encMeta = await cryptoModule.encryptMetadata(metadata, photoKey);
 
-      // 7. Complete - Pass the DECRYPTED version for immediate UI display
-      const displayPhoto = {
-        id: savedPhoto.id,
-        url: preview, // Use local preview
+        // 5. Upload encrypted files
+        setUploadProgress(`Uploading ${i + 1}/${filesToUpload.length} photos...`);
+        await storageService.uploadWithCaching(encryptedFile, storagePath);
+        await storageService.uploadWithCaching(encryptedThumbnail, thumbnailPath);
+
+        // 6. Store encrypted photo record data (will be saved after post is created)
+        encryptedPhotoRecords.push({
+          id: photoId,
+          albumId: albumId,
+          version: 1,
+          createdAt: Date.now(),
+          encryptedPath: storagePath,
+          thumbnailPath: thumbnailPath,
+          encryptedMetadata: encMeta.encrypted,
+          metadataIv: encMeta.iv,
+          metadataAuthTag: encMeta.authTag,
+          photoIv: encMeta.photoIv || "",
+          authorId: user.id
+        });
+
+        console.log(`[Upload] Photo ${i + 1} encrypted and uploaded`);
+      }
+
+      // 7. Create Post (with references to all photos)
+      setUploadProgress('Creating post...');
+      const postData: Omit<Post, 'id'> = {
+        albumId: albumId,
         caption: analysis.caption,
         tags: analysis.tags,
         date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         author: user.name,
         authorId: user.id,
+        photoIds: [], // Will be populated after photos are saved
+        coverPhotoId: '', // Will be set to first photo ID
+        createdAt: Date.now(),
+        isEncrypted: true,
         likes: [],
-        commentsCount: 0,
-        isEncrypted: true
+        commentsCount: 0
       };
 
-      onUploadComplete(displayPhoto as any);
+      const createdPost = await photoService.createPost(postData);
+      console.log(`[Upload] Post created: ${createdPost.id}`);
+
+      // 8. Save all photos to album subcollection
+      setUploadProgress('Saving photos...');
+      const savedPhotos = await photoService.addPhotosToPost(
+        albumId,
+        createdPost.id,
+        encryptedPhotoRecords
+      );
+
+      // 9. Update post with actual photo IDs (in memory and Firestore)
+      const uploadedPhotoIds = savedPhotos.map(p => p.id);
+      const uploadedCoverPhotoId = savedPhotos[0].id;
+
+      createdPost.photoIds = uploadedPhotoIds;
+      createdPost.coverPhotoId = uploadedCoverPhotoId;
+
+      // Update the post document in Firestore with the photo IDs
+      const { doc, updateDoc } = await import('firebase/firestore');
+      const { db } = await import('../lib/firebase');
+      const postRef = doc(db, 'posts', createdPost.id);
+      await updateDoc(postRef, {
+        photoIds: uploadedPhotoIds,
+        coverPhotoId: uploadedCoverPhotoId
+      });
+
+      console.log(`[Upload] Multi-image post upload complete: ${savedPhotos.length} photos, IDs updated in Firestore`);
+
+      // 10. Return the complete post
+      onUploadComplete(createdPost);
     } catch (error: any) {
       console.error("Upload failed", error);
       setValidationError({
         title: 'Upload Failed',
-        message: error.message || "Failed to upload secure photo.",
+        message: error.message || "Failed to upload secure photos.",
         suggestion: 'Please try again.'
       });
     } finally {
       setIsUploading(false);
+      setUploadProgress('');
     }
   };
 
@@ -331,7 +420,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         </div>
 
         <div className="p-8">
-          {!preview ? (
+          {filesToUpload.length === 0 ? (
             <>
               <div
                 className={`group relative h-80 border-2 border-dashed rounded-3xl flex flex-col items-center justify-center text-center transition-all duration-300 cursor-pointer ${isDragging
@@ -348,14 +437,15 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                   ref={fileInputRef}
                   className="hidden"
                   accept="image/jpeg,image/jpg,image/png,image/heic,image/heif,image/webp"
-                  onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+                  multiple
+                  onChange={(e) => e.target.files && e.target.files.length > 0 && handleFiles(e.target.files)}
                 />
                 <div className="w-20 h-20 bg-white shadow-sm rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
                   <Upload size={32} className="text-orange-400" />
                 </div>
-                <h3 className="text-xl font-bold text-stone-800 mb-2">Drop your photo here</h3>
+                <h3 className="text-xl font-bold text-stone-800 mb-2">Drop your photos here</h3>
                 <p className="text-stone-500 text-sm max-w-xs mx-auto">or click to browse from your computer</p>
-                <p className="text-stone-400 text-xs mt-4">Supports JPEG, PNG, HEIC (max 20MB)</p>
+                <p className="text-stone-400 text-xs mt-4">Supports JPEG, PNG, HEIC (max 20MB each, {MAX_IMAGES_PER_POST} photos max)</p>
               </div>
 
               {/* Validation Error Message */}
@@ -381,18 +471,58 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
               )}
             </>
           ) : (
-            <div className="grid md:grid-cols-2 gap-10">
-              <div className="space-y-4">
-                <div className="relative rounded-2xl overflow-hidden shadow-lg aspect-[4/5] bg-stone-100 group">
-                  <img src={preview} alt="Preview" className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="space-y-6">
+              {/* Image Preview Grid */}
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-stone-400 uppercase tracking-wider">
+                    Selected Photos ({filesToUpload.length}/{MAX_IMAGES_PER_POST})
+                  </h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setFilesToUpload([]);
+                      setPreviews([]);
+                      setAnalysis(null);
+                    }}
+                    className="text-xs text-stone-500"
+                  >
+                    Clear All
+                  </Button>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => { setPreview(null); setAnalysis(null); }} className="w-full text-stone-500">
-                  Choose different photo
-                </Button>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-4">
+                  {previews.map((previewUrl, index) => (
+                    <div key={index} className="relative group aspect-square rounded-xl overflow-hidden bg-stone-100">
+                      <img src={previewUrl} alt={`Preview ${index + 1}`} className="w-full h-full object-cover" />
+                      <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full font-bold">
+                        {index + 1}
+                      </div>
+                      <button
+                        onClick={() => removeFile(index)}
+                        className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        type="button"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Add more button if under limit */}
+                  {filesToUpload.length < MAX_IMAGES_PER_POST && (
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="aspect-square rounded-xl border-2 border-dashed border-stone-300 hover:border-orange-400 hover:bg-orange-50/50 flex flex-col items-center justify-center cursor-pointer transition-all"
+                    >
+                      <Plus size={24} className="text-stone-400 mb-1" />
+                      <span className="text-xs text-stone-500 font-medium">Add More</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="flex flex-col h-full">
+              <div className="space-y-6">
                 <div className="flex-1 space-y-8">
                   <div>
                     <h3 className="text-sm font-bold text-stone-400 uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -475,21 +605,26 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                     ) : (
                       <div className="text-center py-10 text-stone-400 bg-stone-50 rounded-xl border border-dashed border-stone-200">
                         <p>Analysis could not be completed.</p>
-                        <Button variant="ghost" size="sm" onClick={() => runAIAnalysis(preview!)} className="mt-2 text-orange-500">Retry</Button>
+                        <Button variant="ghost" size="sm" onClick={() => runAIAnalysis(filesToUpload)} className="mt-2 text-orange-500">Retry</Button>
                       </div>
                     )}
                   </div>
                 </div>
 
                 <div className="pt-8 mt-8 border-t border-stone-100">
+                  {uploadProgress && (
+                    <div className="mb-4 text-center text-sm text-orange-600 font-medium">
+                      {uploadProgress}
+                    </div>
+                  )}
                   <Button
                     onClick={handleSave}
-                    disabled={isAnalyzing || !analysis || isUploading || !selectedAlbumId}
+                    disabled={isAnalyzing || !analysis || isUploading || !selectedAlbumId || filesToUpload.length === 0}
                     isLoading={isUploading}
                     className="w-full py-4 text-base shadow-xl shadow-orange-500/20 hover:shadow-orange-500/30 active:scale-[0.98]"
                   >
                     <Check size={20} className="mr-2" />
-                    Save secure memory
+                    {filesToUpload.length > 1 ? `Save ${filesToUpload.length} photos as post` : 'Save secure memory'}
                   </Button>
                 </div>
               </div>

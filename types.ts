@@ -1,6 +1,8 @@
 export interface Photo {
   id: string;
   albumId?: string; // Album this photo belongs to
+  postId?: string; // Reference to parent Post (for multi-image posts)
+  orderInPost?: number; // Position in multi-image post (0-indexed)
   url: string; // Base64 or URL
   thumbnailUrl?: string; // Thumbnail URL
   caption: string;
@@ -24,6 +26,22 @@ export interface Photo {
   aiTags?: string[]; // AI-generated tags
   analysis?: Record<string, any>; // AI analysis data
   aiProcessed?: boolean;
+}
+
+export interface Post {
+  id: string;
+  albumId?: string; // Album this post belongs to
+  caption: string;
+  tags: string[];
+  date: string;
+  author: string;
+  authorId: string;
+  photoIds: string[]; // Array of photo IDs in this post (1 or more, max 10)
+  coverPhotoId: string; // Primary photo to show in feed (first photo)
+  createdAt: number;
+  isEncrypted?: boolean;
+  likes?: string[];
+  commentsCount?: number;
 }
 
 export interface User {

@@ -1,25 +1,50 @@
 import React, { useState, useEffect } from 'react';
-import { Photo, User } from '../types';
-import { Share2, MessageCircle, Calendar, Lock } from 'lucide-react';
+import { Post, Photo, User } from '../types';
+import { MessageCircle, Calendar, Lock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { LikeButton } from './LikeButton';
 import { useAuth } from '../context/AuthContext';
 
 interface PhotoCardProps {
-  photo: Photo;
-  onClick: (photo: Photo) => void;
+  photo: Post | Photo; // Accept both for backward compatibility
+  onClick: (photo: Photo | Post) => void;
   currentUser: User | null;
+}
+
+// Type guard to check if it's a Post
+function isPost(item: Post | Photo): item is Post {
+  return 'photoIds' in item && Array.isArray((item as Post).photoIds);
 }
 
 export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUser }) => {
   const { getAlbumKey } = useAuth();
-  const [displayUrl, setDisplayUrl] = useState<string>(photo.url);
+
+  // Carousel state (only for multi-image posts)
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [displayUrls, setDisplayUrls] = useState<string[]>([]);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
 
+  const post = isPost(photo) ? photo : null;
+  const photoCount = post ? post.photoIds.length : 1;
+
+  // Debug logging
+  console.log(`[PhotoCard] Rendering item ${photo.id}:`, {
+    isPost: !!post,
+    photoIds: post?.photoIds,
+    photoCount,
+    caption: photo.caption
+  });
+
   useEffect(() => {
-    // Only decrypt if photo is marked as encrypted
+    // Reset carousel when photo/post changes
+    setCurrentImageIndex(0);
+    setDisplayUrls([]);
+    setIsDecrypting(false);
+    setIsLocked(false);
+
+    // Handle non-encrypted or non-post items
     if (!photo.isEncrypted || !photo.albumId) {
-      setDisplayUrl(photo.url);
+      setDisplayUrls([photo.url || '']);
       return;
     }
 
@@ -30,91 +55,122 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
       return;
     }
 
-    // Decrypt the photo
-    const decryptPhoto = async () => {
+    // Decrypt photos
+    const decryptPhotos = async () => {
       setIsDecrypting(true);
       try {
         const { cacheService } = await import('../services/cacheService');
         const { storageService } = await import('../services/storageService');
+        const { photoService } = await import('../services/photoService');
 
-        // Use albumPhotoId if available, otherwise use photo.id
-        const photoId = photo.albumPhotoId || photo.id;
-        console.log(`[PhotoCard] Decrypting photo - feedId: ${photo.id}, albumPhotoId: ${photo.albumPhotoId}, using: ${photoId}`);
+        if (post) {
+          // Multi-image post - decrypt all photos
+          console.log(`[PhotoCard] Decrypting post ${post.id} with ${post.photoIds.length} photos`);
 
-        // Check cache first
-        let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
+          const urls: string[] = [];
 
-        if (imageBlob) {
-          console.log(`[PhotoCard] Cache hit for thumbnail ${photoId}`);
-          setDisplayUrl(URL.createObjectURL(imageBlob));
+          // Get all photos for this post from the album
+          const postPhotos = await photoService.getPostPhotos(photo.albumId!, post.id);
+
+          for (let i = 0; i < postPhotos.length; i++) {
+            const photoData = postPhotos[i];
+            const photoId = photoData.id;
+
+            console.log(`[PhotoCard] Decrypting photo ${i + 1}/${postPhotos.length}: ${photoId}`);
+
+            // Check cache first
+            let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
+
+            if (imageBlob) {
+              console.log(`[PhotoCard] Cache hit for thumbnail ${photoId}`);
+              urls.push(URL.createObjectURL(imageBlob));
+            } else {
+              console.log(`[PhotoCard] Cache miss for ${photoId}, decrypting...`);
+
+              // Import crypto modules
+              const photoKeyModule = await import('../lib/crypto/photoKey');
+              const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+
+              // Derive photo key
+              const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
+
+              const pathToLoad = photoData.thumbnailPath || photoData.encryptedPath;
+
+              if (!pathToLoad) {
+                console.error(`[PhotoCard] No file path found for photo ${photoId}`);
+                continue;
+              }
+
+              // Download and decrypt
+              const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+              imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+              const decryptedUrl = URL.createObjectURL(imageBlob);
+              urls.push(decryptedUrl);
+
+              // Cache the decrypted thumbnail
+              await cacheService.setCachedDecryptedPhoto(photoId, photo.albumId!, imageBlob, 'thumbnail');
+            }
+          }
+
+          setDisplayUrls(urls);
+          console.log(`[PhotoCard] Post decrypted successfully: ${urls.length} images`);
         } else {
-          // Cache miss - need to decrypt
-          console.log(`[PhotoCard] Cache miss for ${photoId}, decrypting...`);
+          // Single photo (legacy)
+          const photoId = (photo as any).albumPhotoId || photo.id;
+          console.log(`[PhotoCard] Decrypting single photo: ${photoId}`);
 
-          // Import crypto modules
-          const photoKeyModule = await import('../lib/crypto/photoKey');
-          const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+          let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
 
-          // Load encrypted photo from the album subcollection
-          // For feed photos, we need to fetch the actual encrypted data from the album
-          const { collection, query, where, getDocs } = await import('firebase/firestore');
-          const { db } = await import('../lib/firebase');
+          if (!imageBlob) {
+            const photoKeyModule = await import('../lib/crypto/photoKey');
+            const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+            const { collection, query, where, getDocs } = await import('firebase/firestore');
+            const { db } = await import('../lib/firebase');
 
-          // Fetch the photo document from album subcollection
-          console.log(`[PhotoCard] Fetching photo from albums/${photo.albumId}/photos/${photoId}`);
-          const photoQuery = query(
-            collection(db, 'albums', photo.albumId, 'photos'),
-            where('__name__', '==', photoId)
-          );
-          const snapshot = await getDocs(photoQuery);
+            const photoQuery = query(
+              collection(db, 'albums', photo.albumId, 'photos'),
+              where('__name__', '==', photoId)
+            );
+            const snapshot = await getDocs(photoQuery);
 
-          if (snapshot.empty) {
-            console.error(`[PhotoCard] Photo ${photoId} not found in album ${photo.albumId}`);
-            setIsLocked(true);
-            return;
+            if (!snapshot.empty) {
+              const photoDoc = snapshot.docs[0].data();
+              const actualPhotoId = photoDoc.id;
+              const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
+              const pathToLoad = photoDoc.thumbnailPath || photoDoc.encryptedPath;
+
+              if (pathToLoad) {
+                const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+                imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+                await cacheService.setCachedDecryptedPhoto(actualPhotoId, photo.albumId, imageBlob, 'thumbnail');
+              }
+            }
           }
 
-          const photoDoc = snapshot.docs[0].data();
-          console.log(`[PhotoCard] Photo document fetched, has thumbnailPath: ${!!photoDoc.thumbnailPath}, has encryptedPath: ${!!photoDoc.encryptedPath}`);
-
-          // CRITICAL: Use the UUID from photoDoc.id, not the Firestore document ID!
-          // The Firestore document ID is auto-generated, but encryption uses the UUID
-          const actualPhotoId = photoDoc.id;
-          console.log(`[PhotoCard] Using actual photoId for decryption: ${actualPhotoId} (Firestore doc ID was: ${photoId})`);
-
-          // Derive photo key with the ACTUAL UUID used during encryption
-          const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
-
-          const pathToLoad = photoDoc.thumbnailPath || photoDoc.encryptedPath;
-
-          if (!pathToLoad) {
-            console.error(`[PhotoCard] No file path found for photo ${photoId}`);
-            setIsLocked(true);
-            return;
+          if (imageBlob) {
+            setDisplayUrls([URL.createObjectURL(imageBlob)]);
           }
-
-          console.log(`[PhotoCard] Loading encrypted blob from: ${pathToLoad}`);
-          // Download and decrypt
-          const encryptedBlob = await storageService.downloadBlob(pathToLoad);
-          console.log(`[PhotoCard] Blob downloaded, size: ${encryptedBlob.size}, attempting decryption...`);
-          imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
-          const decryptedUrl = URL.createObjectURL(imageBlob);
-          setDisplayUrl(decryptedUrl);
-
-          // Cache the decrypted thumbnail using the actual UUID
-          await cacheService.setCachedDecryptedPhoto(actualPhotoId, photo.albumId, imageBlob, 'thumbnail');
-          console.log(`[PhotoCard] Photo decrypted and cached successfully`);
         }
       } catch (err) {
-        console.error('[PhotoCard] Failed to decrypt photo:', err);
+        console.error('[PhotoCard] Failed to decrypt:', err);
         setIsLocked(true);
       } finally {
         setIsDecrypting(false);
       }
     };
 
-    decryptPhoto();
-  }, [photo.isEncrypted, photo.albumId, photo.id, photo.albumPhotoId, getAlbumKey]);
+    decryptPhotos();
+  }, [photo.id, photo.isEncrypted, photo.albumId, getAlbumKey]);
+
+  const handlePrevImage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentImageIndex((prev) => (prev === 0 ? photoCount - 1 : prev - 1));
+  };
+
+  const handleNextImage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentImageIndex((prev) => (prev === photoCount - 1 ? 0 : prev + 1));
+  };
 
   return (
     <div
@@ -131,16 +187,62 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
             <Lock size={32} className="text-stone-300 mb-2" />
             <p className="text-xs text-stone-400">Encrypted</p>
           </div>
-        ) : (
-          <img
-            src={displayUrl}
-            alt={photo.caption}
-            className="w-full h-auto object-cover"
-            loading="lazy"
-          />
-        )}
+        ) : displayUrls.length > 0 ? (
+          <>
+            <img
+              src={displayUrls[currentImageIndex]}
+              alt={photo.caption}
+              className="w-full h-auto object-cover"
+              loading="lazy"
+            />
+
+            {/* Multi-image indicator */}
+            {photoCount > 1 && (
+              <>
+                {/* Image counter badge */}
+                <div className="absolute top-3 right-3 bg-black/60 text-white text-xs px-2 py-1 rounded-full font-bold backdrop-blur-sm">
+                  {currentImageIndex + 1}/{photoCount}
+                </div>
+
+                {/* Navigation arrows (show on hover for desktop) */}
+                {photoCount > 1 && (
+                  <>
+                    <button
+                      onClick={handlePrevImage}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                      aria-label="Previous image"
+                    >
+                      <ChevronLeft size={20} className="text-stone-800" />
+                    </button>
+                    <button
+                      onClick={handleNextImage}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                      aria-label="Next image"
+                    >
+                      <ChevronRight size={20} className="text-stone-800" />
+                    </button>
+                  </>
+                )}
+
+                {/* Pagination dots */}
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+                  {Array.from({ length: Math.min(photoCount, 10) }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      className={`h-1.5 rounded-full transition-all ${idx === currentImageIndex
+                        ? 'w-6 bg-white'
+                        : 'w-1.5 bg-white/50'
+                        }`}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        ) : null}
+
         {/* Gradient Overlay on Hover */}
-        {!isDecrypting && !isLocked && (
+        {!isDecrypting && !isLocked && displayUrls.length > 0 && (
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-end justify-between p-5">
             <div className="flex gap-3">
               <LikeButton photoId={photo.id} currentUserId={currentUser?.id} />

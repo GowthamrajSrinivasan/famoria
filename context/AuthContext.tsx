@@ -148,10 +148,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
+  // Auto-unlock all albums when user is available (page load/refresh)
+  // This runs FIRST to check IndexedDB for stored MasterKeys (no Drive token needed!)
+  useEffect(() => {
+    if (user) {
+      console.log('[AuthContext] User authenticated, triggering immediate auto-unlock from IndexedDB');
+      autoUnlockAllAlbums(user.id);
+    }
+  }, [user]); // Runs when user becomes available
+
   // Auto-unlock all albums when Google token becomes available after sign-in
+  // This provides a second attempt if IndexedDB unlock failed
   useEffect(() => {
     if (user && googleAccessToken) {
-      console.log('[AuthContext] Google token available, triggering auto-unlock for all albums');
+      console.log('[AuthContext] Google token available, triggering Drive-based auto-unlock for all albums');
       autoUnlockAllAlbums(user.id);
     }
   }, [user, googleAccessToken]);

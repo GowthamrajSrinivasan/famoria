@@ -35,7 +35,7 @@ async function prepareImagePart(input: string): Promise<{ mimeType: string; data
     const response = await fetch(input, { mode: 'cors' });
     if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
     const blob = await response.blob();
-    
+
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -94,6 +94,57 @@ export const analyzeImage = async (
     return {
       caption: "A beautiful memory.",
       tags: ["Family", "Memory"],
+      suggestedAlbum: "General",
+    };
+  }
+};
+
+/* ====================== ANALYZE MULTIPLE IMAGES (Multi-Post) ====================== */
+
+export const analyzeMultipleImages = async (
+  imageInputs: string[]
+): Promise<AIAnalysisResult> => {
+  try {
+    const ai = getAI();
+
+    // Prepare all image parts (limit to 10 as per spec)
+    const limitedInputs = imageInputs.slice(0, 10);
+    const imageParts = await Promise.all(
+      limitedInputs.map(input => prepareImagePart(input))
+    );
+
+    // Build content parts: all images + text prompt
+    const parts = [
+      ...imageParts.map(imagePart => ({
+        inlineData: {
+          mimeType: imagePart.mimeType,
+          data: imagePart.data,
+        },
+      })),
+      {
+        text: `Analyze these ${imageParts.length} family photos as a collection. Create a unified heartwarming caption that describes the set of images together, extract 3-5 relevant tags, and suggest a short album name that captures the theme.`,
+      },
+    ];
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: { parts },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: analysisSchema,
+        systemInstruction: "You are a warm, nostalgic AI assistant for a family photo app named Famoria. You're analyzing multiple images that will be posted together, so create a caption that describes the collection as a whole.",
+      },
+    });
+
+    const text = response.text;
+    if (!text) throw new Error("Empty response from Gemini");
+
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Gemini Multi-Image Analysis Error:", error);
+    return {
+      caption: "A beautiful collection of memories.",
+      tags: ["Family", "Memory", "Collection"],
       suggestedAlbum: "General",
     };
   }
