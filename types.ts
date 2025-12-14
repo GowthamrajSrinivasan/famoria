@@ -87,8 +87,7 @@ export interface Album {
   id: string;
   name: string; // Required, max 50 chars
   description?: string; // Optional, max 500 chars
-  coverPhoto?: string; // Storage path to cover photo thumbnail
-  coverPhotoId?: string; // ID of the photo for key derivation
+  coverPhoto?: string; // Public Firebase Storage URL for cover image
   createdBy: string; // User ID
   createdAt: number; // Timestamp
   updatedAt: number; // Timestamp

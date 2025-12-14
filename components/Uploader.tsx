@@ -385,22 +385,16 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         coverPhotoId: uploadedCoverPhotoId
       });
 
-      // Update album metadata (coverPhoto path + ID, photoCount, updatedAt)
+      // Update album metadata (photoCount, updatedAt) - user manages cover photo manually
       if (selectedAlbumId) {
         const albumRef = doc(db, 'albums', selectedAlbumId);
-        // For encrypted photos, store the thumbnail Storage path
-        // AlbumCard or AlbumGrid will decrypt it
-        const firstPhotoThumbnailPath = savedPhotos[0]?.thumbnailPath || savedPhotos[0]?.encryptedPath;
-        const firstPhotoId = savedPhotos[0]?.id;
 
         await updateDoc(albumRef, {
-          coverPhoto: firstPhotoThumbnailPath, // Storage path
-          coverPhotoId: firstPhotoId, // Photo ID for key derivation
           photoCount: increment(1),
           updatedAt: Date.now()
         });
 
-        console.log(`[Upload] Album ${selectedAlbumId} updated: coverPhoto=${firstPhotoThumbnailPath}, coverPhotoId=${firstPhotoId}, photoCount incremented`);
+        console.log(`[Upload] Album ${selectedAlbumId} updated: photoCount incremented`);
       }
 
       console.log(`[Upload] Multi-image post upload complete: ${savedPhotos.length} photos, IDs updated in Firestore`);

@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { MoreVertical, Trash2, Edit, Image as ImageIcon, Calendar } from 'lucide-react';
 import { Album } from '../types';
-import { useAuth } from '../context/AuthContext';
 
 interface AlbumCardProps {
     album: Album;
@@ -38,72 +37,8 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
     onEdit,
     onDelete
 }) => {
-    const [showMenu, setShowMenu] = React.useState(false);
+    const [showMenu, setShowMenu] = useState(false);
     const isOwner = currentUserId === album.createdBy;
-    const { getAlbumKey } = useAuth();
-
-    // Decrypt cover photo if it's encrypted
-    const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(album.coverPhoto || null);
-    const [isDecrypting, setIsDecrypting] = useState(false);
-
-    useEffect(() => {
-        // If coverPhoto looks like a Storage path (contains /) AND has coverPhotoId, it's encrypted
-        if (album.coverPhoto && album.coverPhoto.includes('/') && album.coverPhotoId) {
-            const albumKey = getAlbumKey(album.id);
-            if (!albumKey) {
-                setCoverPhotoUrl(null);
-                return;
-            }
-
-            const decryptCover = async () => {
-                setIsDecrypting(true);
-                try {
-                    const { storageService } = await import('../services/storageService');
-                    const { cacheService } = await import('../services/cacheService');
-
-                    // Try to get from cache first
-                    const cacheKey = `album_cover_${album.id}`;
-                    let imageBlob = await cacheService.getCachedDecryptedPhoto(cacheKey, 'thumbnail');
-
-                    if (!imageBlob) {
-                        // Download and decrypt with proper photo key
-                        const photoKeyModule = await import('../lib/crypto/photoKey');
-                        const photoCryptoModule = await import('../lib/crypto/photoCrypto');
-
-                        // Derive photo key using album key + photo ID
-                        const photoKey = await photoKeyModule.derivePhotoKey(albumKey, album.coverPhotoId!);
-
-                        // Download encrypted thumbnail
-                        const encryptedBlob = await storageService.downloadBlob(album.coverPhoto!);
-
-                        // Decrypt
-                        imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
-
-                        // Cache it
-                        await cacheService.setCachedDecryptedPhoto(cacheKey, album.id, imageBlob, 'thumbnail');
-                        console.log(`[AlbumCard] Decrypted and cached cover for album ${album.id}`);
-                    }
-
-                    setCoverPhotoUrl(URL.createObjectURL(imageBlob));
-                } catch (err) {
-                    console.error('[AlbumCard] Failed to decrypt cover:', err);
-                    // Show placeholder on error
-                    setCoverPhotoUrl(null);
-                } finally {
-                    setIsDecrypting(false);
-                }
-            };
-
-            decryptCover();
-        } else if (album.coverPhoto && album.coverPhoto.includes('/') && !album.coverPhotoId) {
-            // Old album with encrypted path but no photoId - can't decrypt, show placeholder
-            console.log(`[AlbumCard] Album ${album.id} has encrypted cover but no coverPhotoId, showing placeholder`);
-            setCoverPhotoUrl(null);
-        } else {
-            // Direct URL (non-encrypted) or no cover photo
-            setCoverPhotoUrl(album.coverPhoto || null);
-        }
-    }, [album.coverPhoto || '', album.coverPhotoId || '', album.id, getAlbumKey]);
 
     return (
         <div
@@ -112,13 +47,9 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
         >
             {/* Cover Photo */}
             <div className="aspect-square bg-gradient-to-br from-stone-100 to-stone-200 relative overflow-hidden">
-                {isDecrypting ? (
-                    <div className="w-full h-full flex items-center justify-center">
-                        <div className="w-8 h-8 border-4 border-stone-200 border-t-orange-500 rounded-full animate-spin" />
-                    </div>
-                ) : coverPhotoUrl ? (
+                {album.coverPhoto ? (
                     <img
-                        src={coverPhotoUrl}
+                        src={album.coverPhoto}
                         alt={album.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />
