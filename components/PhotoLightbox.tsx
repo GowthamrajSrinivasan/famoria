@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2, Loader2 } from 'lucide-react';
 import { Photo, User } from '../types';
 import { CommentSection } from './CommentSection';
 import { LikeButton } from './LikeButton';
 import { EditPhotoModal } from './EditPhotoModal';
 import { photoService } from '../services/photoService';
+import { useAuth } from '../context/AuthContext';
 
 interface PhotoLightboxProps {
   photo: Photo;
@@ -15,13 +16,110 @@ interface PhotoLightboxProps {
 }
 
 export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser, onClose, onPhotoUpdate, onPhotoDelete }) => {
+  const { getAlbumKey } = useAuth();
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
 
+  // Full-resolution image state
+  const [fullResUrl, setFullResUrl] = useState<string>(photo.url);
+  const [isDecryptingFullRes, setIsDecryptingFullRes] = useState(false);
+
+  // Decrypt full-resolution image for encrypted photos
+  useEffect(() => {
+    if (!photo.isEncrypted || !photo.albumId) {
+      setFullResUrl(photo.url);
+      return;
+    }
+
+    const albumKey = getAlbumKey(photo.albumId);
+    if (!albumKey) {
+      // Album locked - show thumbnail
+      setFullResUrl(photo.url);
+      return;
+    }
+
+    const decryptFullResImage = async () => {
+      setIsDecryptingFullRes(true);
+      try {
+        const { cacheService } = await import('../services/cacheService');
+        const { storageService } = await import('../services/storageService');
+
+        const photoId = photo.albumPhotoId || photo.id;
+
+        // Check cache for full-res image
+        let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'full');
+
+        if (imageBlob) {
+          console.log(`[PhotoLightbox] Cache hit for full-res ${photoId}`);
+          setFullResUrl(URL.createObjectURL(imageBlob));
+        } else {
+          console.log(`[PhotoLightbox] Cache miss for ${photoId}, decrypting full-res...`);
+
+          // Import crypto modules
+          const photoKeyModule = await import('../lib/crypto/photoKey');
+          const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+
+          // Fetch photo document from album subcollection
+          const { collection, query, where, getDocs } = await import('firebase/firestore');
+          const { db } = await import('../lib/firebase');
+
+          const photoQuery = query(
+            collection(db, 'albums', photo.albumId, 'photos'),
+            where('__name__', '==', photoId)
+          );
+          const snapshot = await getDocs(photoQuery);
+
+          if (snapshot.empty) {
+            console.error(`[PhotoLightbox] Photo ${photoId} not found in album ${photo.albumId}`);
+            return;
+          }
+
+          const photoDoc = snapshot.docs[0].data();
+
+          // Use actual UUID from photoDoc.id for key derivation
+          const actualPhotoId = photoDoc.id;
+          console.log(`[PhotoLightbox] Decrypting full-res with photoId: ${actualPhotoId}`);
+
+          // Derive photo key
+          const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
+
+          // Use FULL encryptedPath (not thumbnailPath!)
+          const pathToLoad = photoDoc.encryptedPath;
+
+          if (!pathToLoad) {
+            console.error(`[PhotoLightbox] No encryptedPath found for photo ${photoId}`);
+            return;
+          }
+
+          console.log(`[PhotoLightbox] Loading full-res encrypted blob from: ${pathToLoad}`);
+          const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+          console.log(`[PhotoLightbox] Blob downloaded, size: ${encryptedBlob.size}, decrypting...`);
+
+          imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+          const decryptedUrl = URL.createObjectURL(imageBlob);
+          setFullResUrl(decryptedUrl);
+
+          // Cache the decrypted full-res image
+          await cacheService.setCachedDecryptedPhoto(actualPhotoId, photo.albumId, imageBlob, 'full');
+          console.log(`[PhotoLightbox] Full-res image decrypted and cached successfully`);
+        }
+      } catch (err) {
+        console.error('[PhotoLightbox] Failed to decrypt full-res image:', err);
+        // Fallback to thumbnail
+        setFullResUrl(photo.url);
+      } finally {
+        setIsDecryptingFullRes(false);
+      }
+    };
+
+    decryptFullResImage();
+  }, [photo.isEncrypted, photo.albumId, photo.id, photo.albumPhotoId, photo.url, getAlbumKey]);
+
   // Close on Escape key
-  React.useEffect(() => {
+  useEffect(() => {
+
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !showEditModal) onClose();
     };
@@ -95,8 +193,16 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
 
         {/* Image Section - Darker background for focus */}
         <div className="flex-1 bg-black flex items-center justify-center relative group">
+          {isDecryptingFullRes && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="w-8 h-8 text-white animate-spin" />
+                <span className="text-white text-sm">Loading full resolution...</span>
+              </div>
+            </div>
+          )}
           <img
-            src={photo.url}
+            src={fullResUrl}
             alt={photo.caption}
             className="max-w-full max-h-[50vh] md:max-h-full object-contain"
           />
