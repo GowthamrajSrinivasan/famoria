@@ -20,7 +20,7 @@ function ProtectedApp() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
-  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | Post | null>(null);
 
   // Album state
   const [showCreateAlbumModal, setShowCreateAlbumModal] = useState(false);
@@ -51,10 +51,22 @@ function ProtectedApp() {
     setFilteredPosts(filtered);
   }, [searchQuery, posts]);
 
-  const handleUploadComplete = (newPost: Post) => {
-    // Optimistically add post to state for immediate UI feedback
+  const handleUploadComplete = (newPostOrPosts: Post | Post[] | Photo) => {
+    // Optimistically add post(s) to state for immediate UI feedback
     // The real-time listener will sync it properly
-    setPosts(prevPosts => [newPost, ...prevPosts]);
+    setPosts(prevPosts => {
+      // Handle Photo (from Lightbox update) by casting or ignoring. 
+      // Ideally Lightbox should pass Post if updating a Post.
+      // For now, we assume if it's not array and lacks photoIds, might be a Photo update 
+      // which fits awkwardly. We'll cast to any to allow it in state 
+      // (Post and Photo are similar enough for UI often).
+      const newItems = Array.isArray(newPostOrPosts) ? newPostOrPosts : [newPostOrPosts];
+      const validPosts = newItems.filter(item => 'photoIds' in item || 'url' in item) as Post[];
+
+      // Note: This appends new items. If it's an update, this might duplicate.
+      // But we are preserving existing behavior for now.
+      return [...validPosts, ...prevPosts];
+    });
     setView(ViewState.GALLERY);
   };
 

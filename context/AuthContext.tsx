@@ -3,6 +3,13 @@ import { User } from '../types';
 import { auth, googleProvider, db } from '../lib/firebase';
 import { signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { saveMasterKey, getMasterKey, getDeviceKey } from '../lib/crypto/keyStore';
+import { broadcastUnlock, broadcastLock, setupKeySync } from '../lib/crypto/unlock';
+import { cacheService } from '../services/cacheService';
+import { subscribeToAlbums } from '../services/albumService';
+import { generateAndStoreDeviceKey, wrapMasterKeyForDevice, unwrapMasterKeyWithDevice } from '../lib/crypto/deviceKey';
+import { fetchDriveBlob } from '../services/driveService';
+import { fromBase64 } from '../lib/crypto/masterKey';
 
 // ... imports
 
@@ -38,6 +45,7 @@ const AuthContext = createContext<AuthContextType>({
   lockAlbum: () => { },
   getAlbumKey: () => null,
   lockAll: () => { },
+  autoUnlockAlbum: async () => false,
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -62,7 +70,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Save MasterKey to IndexedDB for instant unlock on refresh
     try {
-      const { saveMasterKey } = await import('@/lib/crypto/keyStore');
       await saveMasterKey(albumId, masterKey);
       console.log(`[AuthContext] MasterKey saved to IDB for instant unlock`);
     } catch (err) {
@@ -70,7 +77,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Broadcast unlock
-    const { broadcastUnlock } = await import('@/lib/crypto/unlock');
     broadcastUnlock(albumId, masterKey);
   };
 
@@ -82,9 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     // Clear decrypted cache for security
-    import('../services/cacheService').then(({ cacheService }) => {
-      cacheService.clearAlbumCache(albumId).catch(console.error);
-    });
+    cacheService.clearAlbumCache(albumId).catch(console.error);
   };
 
   const getAlbumKey = (albumId: string) => albumKeys[albumId] || null;
@@ -93,9 +97,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAlbumKeys({});
 
     // Clear all decrypted cache for security
-    import('../services/cacheService').then(({ cacheService }) => {
-      cacheService.clearAllCache().catch(console.error);
-    });
+    cacheService.clearAllCache().catch(console.error);
   };
 
   useEffect(() => {
@@ -171,18 +173,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!user) return;
 
-    import('@/lib/crypto/unlock').then(({ setupKeySync }) => {
-      const cleanup = setupKeySync({
-        onUnlock: (albumId, key) => {
-          setAlbumKeys(prev => ({ ...prev, [albumId]: key }));
-        },
-        onLockAll: () => {
-          setAlbumKeys({});
-        },
-        getKeys: () => albumKeysRef.current
-      });
-      return cleanup;
+    const cleanup = setupKeySync({
+      onUnlock: (albumId, key) => {
+        setAlbumKeys(prev => ({ ...prev, [albumId]: key }));
+      },
+      onLockAll: () => {
+        setAlbumKeys({});
+      },
+      getKeys: () => albumKeysRef.current
     });
+    return cleanup;
   }, [user]); // Run only when user session starts/changes
 
   const signIn = async () => {
@@ -219,7 +219,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     try {
       // Broadcast lock before signing out
-      const { broadcastLock } = await import('@/lib/crypto/unlock');
       broadcastLock();
 
       await firebaseSignOut(auth);
@@ -241,7 +240,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 2. FASTEST PATH: Check IndexedDB for plain MasterKey (no Drive token needed!)
     try {
       console.log(`[AuthContext] Checking IndexedDB for MasterKey: ${albumId}`);
-      const { getMasterKey } = await import('@/lib/crypto/keyStore');
       const masterKey = await getMasterKey(albumId);
 
       if (masterKey) {
@@ -258,9 +256,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // 3. Try DeviceKey path (hardware-bound security)
     try {
       console.log(`[AuthContext] Checking IndexedDB for DeviceKey: ${albumId}`);
-      const { getDeviceKey } = await import('@/lib/crypto/keyStore');
-      const { unwrapMasterKeyWithDevice } = await import('@/lib/crypto/deviceKey');
-
       const deviceKey = await getDeviceKey(albumId);
       if (deviceKey) {
         console.log(`[AuthContext] DeviceKey found in IndexedDB for ${albumId}`);
@@ -278,7 +273,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // 5. Fetch Blob
         console.log(`[AuthContext] Fetching Drive blob for album ${albumId}`);
-        const { fetchDriveBlob } = await import('@/services/driveService');
+
         const filename = `famoria_album_${albumId}.key`;
         const blobDef = await fetchDriveBlob(filename, token);
 
@@ -325,9 +320,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return false;
       }
 
-      const { fetchDriveBlob } = await import('@/services/driveService');
-      const { fromBase64 } = await import('@/lib/crypto/masterKey');
-
       // Try to fetch plain MasterKey (new filename pattern)
       const plainKeyFilename = `famoria_album_${albumId}_master.key`;
       console.log(`[AuthContext] Fetching plain MasterKey from Drive: ${plainKeyFilename}`);
@@ -354,7 +346,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const autoUnlockAllAlbums = async (userId: string) => {
     try {
       console.log('[AuthContext] Auto-unlocking all albums for user:', userId);
-      const { subscribeToAlbums } = await import('../services/albumService');
+
 
       // Subscribe to user albums and attempt unlock
       const unsubscribe = subscribeToAlbums(userId, async (albums) => {
