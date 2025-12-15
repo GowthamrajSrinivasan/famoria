@@ -2,9 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Lock, X, Loader2, KeyRound, AlertTriangle } from 'lucide-react';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
-import { fetchDriveBlob } from '../services/driveService';
-import { generateAndStoreDeviceKey, wrapMasterKeyForDevice } from '@/lib/crypto/deviceKey';
-import { uploadDriveAppDataFile } from '@/services/driveService'; // For re-wrapping
+import { fetchDriveBlob, uploadDriveAppDataFile, savePlainMasterKey } from '../services/driveService';
+import { generateAndStoreDeviceKey, wrapMasterKeyForDevice } from '../lib/crypto/deviceKey';
 
 // V4 Logic:
 // 1. Check IDB? (AuthContext likely already did this and failed if we are here)
@@ -94,7 +93,6 @@ export const VaultUnlockModal: React.FC<VaultUnlockModalProps> = ({
             await uploadDriveAppDataFile(filename, JSON.stringify(blob), token!);
 
             // 7. Also save plain MasterKey for simplified auto-unlock (Drive fallback)
-            const { savePlainMasterKey } = await import('@/services/driveService');
             await savePlainMasterKey(albumId, toBase64(masterKeyBytes), token!);
             console.log('[VaultUnlockModal] Plain MasterKey saved to Drive for future auto-unlock');
 

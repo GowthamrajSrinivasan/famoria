@@ -5,6 +5,12 @@ import { CommentSection } from './CommentSection';
 import { LikeButton } from './LikeButton';
 import { EditPhotoModal } from './EditPhotoModal';
 import { photoService } from '../services/photoService';
+import { cacheService } from '../services/cacheService';
+import { storageService } from '../services/storageService';
+import * as photoKeyModule from '../lib/crypto/photoKey';
+import * as photoCryptoModule from '../lib/crypto/photoCrypto';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 
 interface PhotoLightboxProps {
@@ -42,22 +48,24 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
     setIsDecryptingFullRes(false);
 
     if (!photo.isEncrypted || !photo.albumId) {
-      setDisplayUrls([photo.url || '']);
+      if ('url' in photo) {
+        setDisplayUrls([photo.url || '']);
+      }
       return;
     }
 
     const albumKey = getAlbumKey(photo.albumId);
     if (!albumKey) {
-      setDisplayUrls([photo.url || '']);
+      if ('url' in photo) {
+        setDisplayUrls([photo.url || '']);
+      }
       return;
     }
 
     const decryptImages = async () => {
       setIsDecryptingFullRes(true);
       try {
-        const { cacheService } = await import('../services/cacheService');
-        const { storageService } = await import('../services/storageService');
-        const { photoService } = await import('../services/photoService');
+
 
         if (post) {
           // Multi-image post
@@ -74,8 +82,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
             let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'full');
 
             if (!imageBlob) {
-              const photoKeyModule = await import('../lib/crypto/photoKey');
-              const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+
 
               const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
               const pathToLoad = photoData.encryptedPath;
@@ -100,8 +107,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
           let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'full');
 
           if (!imageBlob) {
-            const { collection, query, where, getDocs } = await import('firebase/firestore');
-            const { db } = await import('../lib/firebase');
+
 
             const photoQuery = query(
               collection(db, 'albums', photo.albumId, 'photos'),
@@ -113,8 +119,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
               const photoDoc = snapshot.docs[0].data();
               const actualPhotoId = photoDoc.id;
 
-              const photoKeyModule = await import('../lib/crypto/photoKey');
-              const photoCryptoModule = await import('../lib/crypto/photoCrypto');
+
               const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
 
               const pathToLoad = photoDoc.encryptedPath;
@@ -132,7 +137,9 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
         }
       } catch (err) {
         console.error('[PhotoLightbox] Failed to decrypt:', err);
-        setDisplayUrls([photo.url || '']);
+        if ('url' in photo) {
+          setDisplayUrls([photo.url || '']);
+        }
       } finally {
         setIsDecryptingFullRes(false);
       }
@@ -268,8 +275,8 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                         key={idx}
                         onClick={() => setCurrentImageIndex(idx)}
                         className={`h-2 rounded-full transition-all ${idx === currentImageIndex
-                            ? 'w-8 bg-white'
-                            : 'w-2 bg-white/50 hover:bg-white/75'
+                          ? 'w-8 bg-white'
+                          : 'w-2 bg-white/50 hover:bg-white/75'
                           }`}
                       />
                     ))}

@@ -3,6 +3,13 @@ import { Post, Photo, User } from '../types';
 import { MessageCircle, Calendar, Lock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { LikeButton } from './LikeButton';
 import { useAuth } from '../context/AuthContext';
+import { cacheService } from '../services/cacheService';
+import { storageService } from '../services/storageService';
+import { photoService } from '../services/photoService';
+import * as photoKeyModule from '../lib/crypto/photoKey';
+import * as photoCryptoModule from '../lib/crypto/photoCrypto';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 interface PhotoCardProps {
   photo: Post | Photo; // Accept both for backward compatibility
@@ -45,7 +52,9 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
     // Handle non-encrypted or non-post items
     if (!photo.isEncrypted || !photo.albumId) {
-      setDisplayUrls([photo.url || '']);
+      if ('url' in photo) {
+        setDisplayUrls([photo.url || '']);
+      }
       return;
     }
 
@@ -60,10 +69,6 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
     const decryptPhotos = async () => {
       setIsDecrypting(true);
       try {
-        const { cacheService } = await import('../services/cacheService');
-        const { storageService } = await import('../services/storageService');
-        const { photoService } = await import('../services/photoService');
-
         if (post) {
           // Multi-image post - decrypt all photos
           console.log(`[PhotoCard] Decrypting post ${post.id} with ${post.photoIds.length} photos`);
@@ -87,10 +92,6 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
               urls.push(URL.createObjectURL(imageBlob));
             } else {
               console.log(`[PhotoCard] Cache miss for ${photoId}, decrypting...`);
-
-              // Import crypto modules
-              const photoKeyModule = await import('../lib/crypto/photoKey');
-              const photoCryptoModule = await import('../lib/crypto/photoCrypto');
 
               // Derive photo key
               const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
@@ -123,11 +124,6 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
           let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
 
           if (!imageBlob) {
-            const photoKeyModule = await import('../lib/crypto/photoKey');
-            const photoCryptoModule = await import('../lib/crypto/photoCrypto');
-            const { collection, query, where, getDocs } = await import('firebase/firestore');
-            const { db } = await import('../lib/firebase');
-
             const photoQuery = query(
               collection(db, 'albums', photo.albumId, 'photos'),
               where('__name__', '==', photoId)
@@ -172,8 +168,6 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
       }
 
       try {
-        const { doc, getDoc } = await import('firebase/firestore');
-        const { db } = await import('../lib/firebase');
         const albumRef = doc(db, 'albums', photo.albumId);
         const albumSnap = await getDoc(albumRef);
 

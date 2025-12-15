@@ -169,7 +169,7 @@ export const photoService = {
    * @returns Created post with ID
    */
   createPost: async (postData: Omit<Post, 'id'>): Promise<Post> => {
-    console.log(`[PhotoService] Creating post with ${postData.photoIds.length} photos`);
+    console.log(`[PhotoService] Creating post shell (initially with 0 photos, ID generation phase)`);
 
     const docData = {
       ...postData,

@@ -4,8 +4,9 @@ import { Album } from '../types';
 import { createAlbum, updateAlbum } from '../services/albumService';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
-import { generateAndStoreDeviceKey, wrapMasterKeyForDevice } from '@/lib/crypto/deviceKey';
-import { uploadDriveAppDataFile } from '@/services/driveService';
+import { generateAndStoreDeviceKey, wrapMasterKeyForDevice } from '../lib/crypto/deviceKey';
+import { uploadDriveAppDataFile } from '../services/driveService';
+import * as imageUtils from '../lib/imageUtils';
 import { db, storage } from '../lib/firebase';
 import { doc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -112,7 +113,6 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
 
         try {
             // Generate thumbnail
-            const imageUtils = await import('../lib/imageUtils');
             const thumbnailBlob = await imageUtils.generateThumbnail(coverFile, 400);
 
             // Upload to Storage
