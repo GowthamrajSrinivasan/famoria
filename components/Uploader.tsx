@@ -384,16 +384,35 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
 
     try {
       const albumId = selectedAlbumId;
-      console.log(`[Upload] Starting parallel upload: ${filesToUpload.length} photos to album ${albumId}`);
+      console.log(`[Upload] Starting upload of ${filesToUpload.length} photos to album ${albumId} (single post with carousel)`);
 
-      const createdPosts: Post[] = [];
+      // 1. Create a single post shell first
+      const postData: Omit<Post, 'id'> = {
+        albumId: albumId,
+        caption: analysis.caption,
+        tags: analysis.tags,
+        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        author: user.name,
+        authorId: user.id,
+        photoIds: [], // Will populate after uploading photos
+        coverPhotoId: '',
+        createdAt: Date.now(),
+        isEncrypted: true,
+        likes: [],
+        commentsCount: 0
+      };
 
-      // Process each file individually to create separate posts
+      const createdPost = await photoService.createPost(postData);
+      console.log(`[Upload] Created post shell: ${createdPost.id}`);
+
+      const encryptedPhotoRecords = [];
+
+      // 2. Process and upload all photos for this single post
       for (let i = 0; i < filesToUpload.length; i++) {
         const file = filesToUpload[i];
-        setUploadProgress(`${i + 1}/${filesToUpload.length} photos processing...`);
+        setUploadProgress(`Processing ${i + 1}/${filesToUpload.length} photos...`);
 
-        // 1. Generate unique ID for this photo
+        // Generate unique ID for this photo
         const photoId = crypto.randomUUID();
         const fileName = `${Date.now()}_${photoId}.enc`;
         const storagePath = `albums/${albumId}/photos/${fileName}`;
@@ -401,10 +420,10 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
 
         console.log(`[Upload] Processing photo ${i + 1}/${filesToUpload.length}: ${photoId}`);
 
-        // 2. Generate Thumbnail
+        // Generate Thumbnail
         const thumbnail = await imageUtils.generateThumbnail(file, 400, 0.8);
 
-        // 3. Derive Key & Encrypt
+        // Derive Key & Encrypt
         const photoKey = await keyModule.derivePhotoKey(albumKey, photoId);
 
         // Encrypt full image
@@ -414,9 +433,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         const thumbnailFile = new File([thumbnail], 'thumbnail.webp', { type: 'image/webp' });
         const encryptedThumbnail = await cryptoModule.encryptFile(thumbnailFile, photoKey);
 
-        // 4. Encrypt Metadata
+        // Encrypt Metadata
         const metadata = {
-          caption: i === 0 ? analysis.caption : "", // Only put caption on first, or maybe simpler generic caption?
+          caption: analysis.caption,
           tags: analysis.tags,
           date: new Date().toISOString(),
           author: user.name,
@@ -424,7 +443,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         };
         const encMeta = await cryptoModule.encryptMetadata(metadata, photoKey);
 
-        // 5. Upload encrypted files
+        // Upload encrypted files
         setUploadProgress(`Uploading ${i + 1}/${filesToUpload.length}...`);
         await storageService.uploadWithCaching(encryptedFile, storagePath);
         await storageService.uploadWithCaching(encryptedThumbnail, thumbnailPath);
@@ -443,56 +462,40 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
           authorId: user.id
         };
 
-        // 6. Create Individual Post
-        const postData: Omit<Post, 'id'> = {
-          albumId: albumId,
-          caption: analysis.caption, // Each photo gets the caption for now
-          tags: analysis.tags,
-          date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          author: user.name,
-          authorId: user.id,
-          photoIds: [], // Will populate
-          coverPhotoId: '',
-          createdAt: Date.now(),
-          isEncrypted: true,
-          likes: [],
-          commentsCount: 0
-        };
-
-        const createdPost = await photoService.createPost(postData);
-
-        // 7. Save photo to album subcollection
-        const savedPhotos = await photoService.addPhotosToPost(
-          albumId,
-          createdPost.id,
-          [encryptedPhotoRecord]
-        );
-
-        // 8. Update post with photo ID
-        const uploadedPhotoIds = savedPhotos.map(p => p.id);
-        createdPost.photoIds = uploadedPhotoIds;
-        createdPost.coverPhotoId = uploadedPhotoIds[0];
-
-        const postRef = doc(db, 'posts', createdPost.id);
-        await updateDoc(postRef, {
-          photoIds: uploadedPhotoIds,
-          coverPhotoId: uploadedPhotoIds[0]
-        });
-
-        createdPosts.push(createdPost);
-
-        // 9. Update Album Photo Count (Increment for EACH photo)
-        const albumRef = doc(db, 'albums', albumId);
-        await updateDoc(albumRef, {
-          photoCount: increment(1),
-          updatedAt: Date.now()
-        });
-
-        console.log(`[Upload] Photo ${i + 1} uploaded and post created.`);
+        encryptedPhotoRecords.push(encryptedPhotoRecord);
+        console.log(`[Upload] Photo ${i + 1}/${filesToUpload.length} uploaded: ${photoId}`);
       }
 
-      console.log(`[Upload] Parallel upload complete: ${createdPosts.length} posts created.`);
-      onUploadComplete(createdPosts);
+      // 3. Save ALL photos to album subcollection with the post ID
+      console.log(`[Upload] Saving ${encryptedPhotoRecords.length} photos to album subcollection...`);
+      const savedPhotos = await photoService.addPhotosToPost(
+        albumId,
+        createdPost.id,
+        encryptedPhotoRecords
+      );
+
+      // 4. Update the post with all photo IDs
+      const uploadedPhotoIds = savedPhotos.map(p => p.id);
+      createdPost.photoIds = uploadedPhotoIds;
+      createdPost.coverPhotoId = uploadedPhotoIds[0];
+
+      const postRef = doc(db, 'posts', createdPost.id);
+      await updateDoc(postRef, {
+        photoIds: uploadedPhotoIds,
+        coverPhotoId: uploadedPhotoIds[0]
+      });
+
+      console.log(`[Upload] Post updated with ${uploadedPhotoIds.length} photo IDs`);
+
+      // 5. Update Album Photo Count (increment by total number of photos)
+      const albumRef = doc(db, 'albums', albumId);
+      await updateDoc(albumRef, {
+        photoCount: increment(filesToUpload.length),
+        updatedAt: Date.now()
+      });
+
+      console.log(`[Upload] Upload complete: 1 post created with ${uploadedPhotoIds.length} photos`);
+      onUploadComplete([createdPost]);
 
     } catch (error: any) {
       console.error("Upload failed", error);
