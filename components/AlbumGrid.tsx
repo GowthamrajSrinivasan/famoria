@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, FolderOpen } from 'lucide-react';
+import { Plus, Search, FolderOpen, ArrowUpDown } from 'lucide-react';
 import { Album } from '../types';
 import { AlbumCard } from './AlbumCard';
 import { subscribeToAlbums, searchAlbums, deleteAlbum } from '../services/albumService';
@@ -20,6 +20,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
     const [albums, setAlbums] = useState<Album[]>([]);
     const [filteredAlbums, setFilteredAlbums] = useState<Album[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'photos' | 'videos'>('newest');
     const [loading, setLoading] = useState(true);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -45,15 +46,37 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
         return () => unsubscribe();
     }, [currentUserId]);
 
-    // Search functionality
+    // Search and sort functionality
     useEffect(() => {
-        if (!searchTerm.trim()) {
-            setFilteredAlbums(albums);
-        } else {
-            const results = searchAlbums(albums, searchTerm);
-            setFilteredAlbums(results);
+        let result = albums;
+
+        // Apply search filter (client-side)
+        if (searchTerm.trim()) {
+            const query = searchTerm.toLowerCase();
+            result = albums.filter(album =>
+                album.name.toLowerCase().includes(query) ||
+                album.description?.toLowerCase().includes(query)
+            );
         }
-    }, [searchTerm, albums]);
+
+        // Apply sorting
+        const sorted = [...result].sort((a, b) => {
+            switch (sortBy) {
+                case 'newest':
+                    return b.updatedAt - a.updatedAt;
+                case 'oldest':
+                    return a.createdAt - b.createdAt;
+                case 'photos':
+                    return (b.photoCount || 0) - (a.photoCount || 0);
+                case 'videos':
+                    return (b.videoCount || 0) - (a.videoCount || 0);
+                default:
+                    return 0;
+            }
+        });
+
+        setFilteredAlbums(sorted);
+    }, [searchTerm, albums, sortBy]);
 
     const handleDelete = async (albumId: string) => {
         if (isDeleting) return; // Prevent double-click
@@ -99,17 +122,36 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                 </button>
             </div>
 
-            {/* Search Bar */}
+            {/* Search Bar and Sort */}
             {albums.length > 0 && (
-                <div className="mb-6 relative">
-                    <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
-                    <input
-                        type="text"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        placeholder="Search albums..."
-                        className="w-full pl-12 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all"
-                    />
+                <div className="mb-6 flex flex-col sm:flex-row gap-4">
+                    {/* Search Bar */}
+                    <div className="flex-1 relative">
+                        <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Search albums..."
+                            className="w-full pl-12 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all"
+                        />
+                    </div>
+
+                    {/* Sort Dropdown */}
+                    <div className="flex items-center gap-3">
+                        <ArrowUpDown size={16} className="text-stone-400" />
+                        <span className="text-sm font-medium text-stone-600">Sort by:</span>
+                        <select
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as any)}
+                            className="px-4 py-3 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
+                        >
+                            <option value="newest">Newest First</option>
+                            <option value="oldest">Oldest First</option>
+                            <option value="photos">Most Photos</option>
+                            <option value="videos">Most Videos</option>
+                        </select>
+                    </div>
                 </div>
             )}
 

@@ -1,34 +1,135 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Plus, Search, LogOut, Grid, Image as ImageIcon, FolderOpen, Users, Film } from 'lucide-react';
+import { Camera, Plus, Search, LogOut, Grid, Image as ImageIcon, FolderOpen, Users, Film, ArrowUpDown, Filter, X, Bell } from 'lucide-react';
 import { Photo, Post, ViewState, Album } from './types';
 import { PhotoCard } from './components/PhotoCard';
 import { Uploader } from './components/Uploader';
 import { PhotoLightbox } from './components/PhotoLightbox';
 import { Button } from './components/Button';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { UploadProvider } from './context/UploadContext';
+import { UploadProgressWidget } from './components/UploadProgressWidget';
+import { ToastNotification, useToast } from './components/ToastNotification';
 import { Login } from './components/Login';
 import { photoService } from './services/photoService';
 import { AlbumGrid } from './components/AlbumGrid';
 import { CreateAlbumModal } from './components/CreateAlbumModal';
+import { NotificationBell } from './components/NotificationBell';
 import { AlbumView } from './components/AlbumView';
 import { useAutoLock } from './hooks/useAutoLock';
 import { MembersPage } from './components/MembersPage';
 import { VideoGrid } from './components/VideoGrid';
 import { VideoUploader } from './components/VideoUploader';
+import { userService } from './services/userService';
+import { subscribeToAlbums } from './services/albumService';
+import { invitationService } from './services/invitationService';
+import { saveMasterKey } from './lib/crypto/keyStore';
+import { fromBase64 } from './lib/crypto/masterKey';
+import { InviteMemberModal } from './components/InviteMemberModal';
 
 function ProtectedApp() {
   useAutoLock(); // Initialize auto-lock
   const { user, loading, signOut } = useAuth();
+  const { toasts, addToast, removeToast } = useToast();
   const [view, setView] = useState<ViewState>(ViewState.GALLERY);
   const [posts, setPosts] = useState<Post[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'liked' | 'commented'>('newest');
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | Post | null>(null);
+
+  // Filter state
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedUploaders, setSelectedUploaders] = useState<string[]>([]);
+  const [selectedAlbums, setSelectedAlbums] = useState<string[]>([]);
+  const [availableUsers, setAvailableUsers] = useState<{ id: string, name: string }[]>([]);
+  const [availableAlbums, setAvailableAlbums] = useState<Album[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
 
   // Album state
   const [showCreateAlbumModal, setShowCreateAlbumModal] = useState(false);
   const [editAlbum, setEditAlbum] = useState<Album | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteAlbumId, setInviteAlbumId] = useState<string | undefined>(undefined);
+
+  const isProcessingInvite = React.useRef(false);
+
+  // Handle Invitation Links
+  useEffect(() => {
+    const handleInviteLink = async () => {
+      // Prevent multiple executions
+      if (isProcessingInvite.current) return;
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const inviteToken = urlParams.get('invite');
+      const hashParams = new URLSearchParams(window.location.hash.slice(1)); // remove #
+      const keyBase64 = hashParams.get('key');
+
+      if (inviteToken && keyBase64) {
+        // Store in session storage to survive login/redirects
+        sessionStorage.setItem('pendingInviteToken', inviteToken);
+        sessionStorage.setItem('pendingInviteKey', keyBase64);
+
+        // Clean URL to avoid leaking key in history/screenshots
+        window.history.replaceState({}, '', window.location.pathname);
+
+        // If user is not logged in, show toast once
+        if (!user) {
+          isProcessingInvite.current = true;
+          addToast('Please sign in or create an account to accept the invitation.', 'info');
+          // Reset after a delay to allow for future attempts if needed, 
+          // though usually this is a one-off per page load
+          setTimeout(() => { isProcessingInvite.current = false; }, 2000);
+          return;
+        }
+      }
+
+      // Check for pending invite in storage if user is logged in
+      if (user) {
+        const pendingToken = sessionStorage.getItem('pendingInviteToken');
+        const pendingKey = sessionStorage.getItem('pendingInviteKey');
+
+        if (pendingToken && pendingKey) {
+          isProcessingInvite.current = true;
+
+          try {
+            addToast('Accepting invitation...', 'info');
+            const invite = await invitationService.acceptInvitation(pendingToken, user.id);
+
+            // Save the Master Key
+            if (invite.albumId) {
+              const masterKey = fromBase64(pendingKey);
+              await saveMasterKey(invite.albumId, masterKey);
+              addToast('Invitation accepted and album unlocked!', 'success');
+
+              // Force refresh the albums list or similar if needed
+              // For now, the realtime listeners should pick it up
+            } else {
+              addToast('Invitation accepted!', 'success');
+            }
+
+            sessionStorage.removeItem('pendingInviteToken');
+            sessionStorage.removeItem('pendingInviteKey');
+
+          } catch (error) {
+            console.error('Failed to accept invitation:', error);
+            // Only show error if it's not "already accepted" or similar harmless error
+            addToast('Failed to accept invitation. It may be expired.', 'error');
+
+            // Critical: Remove tokens to prevent infinite retry loop
+            sessionStorage.removeItem('pendingInviteToken');
+            sessionStorage.removeItem('pendingInviteKey');
+          } finally {
+            // Keep locked for this session to prevent re-runs on other prop updates
+            // or set false if you want to allow re-trying on error
+            isProcessingInvite.current = false;
+          }
+        }
+      }
+    };
+
+    handleInviteLink();
+  }, [user, addToast]);
 
   // Subscribe to real-time posts feed
   useEffect(() => {
@@ -59,18 +160,78 @@ function ProtectedApp() {
     };
   }, [user]);
 
+  // Fetch users and albums for filters
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setFilteredPosts(posts);
-      return;
+    if (!user) return;
+
+    const fetchFilterData = async () => {
+      try {
+        const users = await userService.getAllUsers();
+        setAvailableUsers(users.map(u => ({ id: u.id, name: u.name })));
+      } catch (error) {
+        console.error('[App] Error fetching users:', error);
+      }
+    };
+
+    const unsubscribeAlbums = subscribeToAlbums(user.id, (albums) => {
+      setAvailableAlbums(albums);
+    });
+
+    fetchFilterData();
+
+    return () => {
+      unsubscribeAlbums();
+    };
+  }, [user]);
+
+  // Filter, search, and sort posts
+  useEffect(() => {
+    let result = posts;
+
+    // Apply tag filter
+    if (selectedTags.length > 0) {
+      result = result.filter(p =>
+        selectedTags.some(tag => p.tags.includes(tag))
+      );
     }
-    const query = searchQuery.toLowerCase();
-    const filtered = posts.filter(p =>
-      p.caption.toLowerCase().includes(query) ||
-      p.tags.some(t => t.toLowerCase().includes(query))
-    );
-    setFilteredPosts(filtered);
-  }, [searchQuery, posts]);
+
+    // Apply uploader filter
+    if (selectedUploaders.length > 0) {
+      result = result.filter(p => selectedUploaders.includes(p.authorId));
+    }
+
+    // Apply album filter
+    if (selectedAlbums.length > 0) {
+      result = result.filter(p => p.albumId && selectedAlbums.includes(p.albumId));
+    }
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(p =>
+        p.caption.toLowerCase().includes(query) ||
+        p.tags.some(t => t.toLowerCase().includes(query))
+      );
+    }
+
+    // Apply sorting
+    const sorted = [...result].sort((a, b) => {
+      switch (sortBy) {
+        case 'newest':
+          return b.createdAt - a.createdAt;
+        case 'oldest':
+          return a.createdAt - b.createdAt;
+        case 'liked':
+          return (b.likes?.length || 0) - (a.likes?.length || 0);
+        case 'commented':
+          return (b.commentsCount || 0) - (a.commentsCount || 0);
+        default:
+          return 0;
+      }
+    });
+
+    setFilteredPosts(sorted);
+  }, [searchQuery, posts, sortBy, selectedTags, selectedUploaders, selectedAlbums]);
 
   const handleUploadComplete = (newPostOrPosts: Post | Post[] | Photo) => {
     // Optimistically add post(s) to state for immediate UI feedback
@@ -91,15 +252,31 @@ function ProtectedApp() {
     setView(ViewState.GALLERY);
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#fafaf9] flex items-center justify-center">
-        <div className="flex flex-col items-center gap-6">
-          <div className="w-16 h-16 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin"></div>
-        </div>
-      </div>
-    );
-  }
+  // Extract unique tags from posts
+  const uniqueTags = Array.from(new Set(posts.flatMap(p => p.tags)));
+
+  // Count active filters
+  const activeFilterCount = selectedTags.length + selectedUploaders.length + selectedAlbums.length;
+
+  // Clear all filters
+  const clearFilters = () => {
+    setSelectedTags([]);
+    setSelectedUploaders([]);
+    setSelectedAlbums([]);
+    setShowFilters(false);
+  };
+
+  const handleNotificationClick = (notification: any) => {
+    if (notification.photoId) {
+      // Navigate to gallery view
+      setView(ViewState.GALLERY);
+      // Find and open the photo in lightbox
+      const post = posts.find(p => p.id === notification.photoId);
+      if (post) {
+        setSelectedPhoto(post);
+      }
+    }
+  };
 
   if (!user) {
     return <Login />;
@@ -181,6 +358,12 @@ function ProtectedApp() {
             </div>
 
             <div className="flex items-center gap-3 pl-6">
+              {/* Notification Bell */}
+              <NotificationBell
+                userId={user.id}
+                onNotificationClick={handleNotificationClick}
+              />
+
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-semibold text-stone-800 leading-none">{user.name}</p>
                 <p className="text-[11px] font-medium text-stone-400 mt-1 uppercase tracking-wide">Family Member</p>
@@ -209,21 +392,223 @@ function ProtectedApp() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         {view === ViewState.GALLERY && (
           <div className="animate-fade-in-up">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-10">
-              <div>
-                <h1 className="text-3xl font-bold text-stone-800 mb-2 font-serif">Family Feed</h1>
-                <p className="text-stone-500">
-                  You have <span className="font-semibold text-stone-800">{posts.length}</span> shared moments
-                </p>
+            <div className="flex flex-col gap-6 mb-10">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                <div>
+                  <h1 className="text-3xl font-bold text-stone-800 mb-2 font-serif">Family Feed</h1>
+                  <p className="text-stone-500">
+                    You have <span className="font-semibold text-stone-800">{posts.length}</span> shared moments
+                  </p>
+                </div>
+                <Button
+                  onClick={() => setView(ViewState.UPLOAD)}
+                  className="shadow-xl shadow-orange-500/20 hover:shadow-orange-500/30 transition-all active:scale-95"
+                >
+                  <Plus size={20} className="mr-2" strokeWidth={2.5} />
+                  Add New Memory
+                </Button>
               </div>
-              <Button
-                onClick={() => setView(ViewState.UPLOAD)}
-                className="shadow-xl shadow-orange-500/20 hover:shadow-orange-500/30 transition-all active:scale-95"
-              >
-                <Plus size={20} className="mr-2" strokeWidth={2.5} />
-                Add New Memory
-              </Button>
+
+              {/* Sort Dropdown */}
+              <div className="flex items-center gap-3">
+                <ArrowUpDown size={18} className="text-stone-400" />
+                <span className="text-sm font-medium text-stone-600">Sort by:</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as any)}
+                  className="px-4 py-2 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
+                >
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                  <option value="liked">Most Liked</option>
+                  <option value="commented">Most Commented</option>
+                </select>
+              </div>
+
+              {/* Filter Button */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeFilterCount > 0
+                    ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                    : 'bg-white border border-stone-200 text-stone-700 hover:border-stone-300'
+                    }`}
+                >
+                  <Filter size={16} />
+                  <span>Filters</span>
+                  {activeFilterCount > 0 && (
+                    <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={clearFilters}
+                    className="text-sm text-stone-500 hover:text-stone-700 font-medium"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Active Filter Chips */}
+            {activeFilterCount > 0 && (
+              <div className="flex flex-wrap gap-2 items-center animate-in fade-in slide-in-from-top-2 duration-200">
+                <span className="text-sm font-medium text-stone-600">Active filters:</span>
+                {selectedTags.map(tag => {
+                  const user = availableUsers.find(u => u.id === tag);
+                  const displayName = user?.name || tag;
+                  return (
+                    <div key={tag} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-full text-sm font-medium transition-all hover:bg-orange-200">
+                      <span>{displayName}</span>
+                      <button
+                        onClick={() => setSelectedTags(selectedTags.filter(t => t !== tag))}
+                        className="hover:text-orange-900 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {selectedUploaders.map(uploaderId => {
+                  const user = availableUsers.find(u => u.id === uploaderId);
+                  return (
+                    <div key={uploaderId} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-sm font-medium transition-all hover:bg-blue-200">
+                      <span>{user?.name || uploaderId}</span>
+                      <button
+                        onClick={() => setSelectedUploaders(selectedUploaders.filter(u => u !== uploaderId))}
+                        className="hover:text-blue-900 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {selectedAlbums.map(albumId => {
+                  const album = availableAlbums.find(a => a.id === albumId);
+                  return (
+                    <div key={albumId} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-sm font-medium transition-all hover:bg-purple-200">
+                      <span>{album?.name || albumId}</span>
+                      <button
+                        onClick={() => setSelectedAlbums(selectedAlbums.filter(a => a !== albumId))}
+                        className="hover:text-purple-900 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Filter Panel */}
+            {showFilters && (
+              <div className="bg-white border border-stone-200 rounded-2xl p-8 shadow-lg shadow-stone-200/50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                  {/* Tags Filter */}
+                  <div>
+                    <label className="block text-sm font-semibold text-stone-800 mb-3">
+                      Tagged People
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {uniqueTags.length === 0 ? (
+                        <p className="text-sm text-stone-400">No tags available</p>
+                      ) : (
+                        uniqueTags.map(tag => {
+                          const user = availableUsers.find(u => u.id === tag);
+                          const displayName = user?.name || tag;
+                          const isSelected = selectedTags.includes(tag);
+                          return (
+                            <button
+                              key={tag}
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedTags(selectedTags.filter(t => t !== tag));
+                                } else {
+                                  setSelectedTags([...selectedTags, tag]);
+                                }
+                              }}
+                              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ease-in-out ${isSelected
+                                ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30 hover:bg-orange-600'
+                                : 'bg-stone-100 text-stone-700 hover:bg-stone-200 hover:shadow-sm'
+                                }`}
+                            >
+                              {displayName}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Uploader Filter */}
+                  <div>
+                    <label className="block text-sm font-semibold text-stone-800 mb-3">
+                      Uploaded By
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {availableUsers.map(user => {
+                        const isSelected = selectedUploaders.includes(user.id);
+                        return (
+                          <button
+                            key={user.id}
+                            onClick={() => {
+                              if (isSelected) {
+                                setSelectedUploaders(selectedUploaders.filter(u => u !== user.id));
+                              } else {
+                                setSelectedUploaders([...selectedUploaders, user.id]);
+                              }
+                            }}
+                            className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ease-in-out ${isSelected
+                              ? 'bg-blue-500 text-white shadow-md shadow-blue-500/30 hover:bg-blue-600'
+                              : 'bg-stone-100 text-stone-700 hover:bg-stone-200 hover:shadow-sm'
+                              }`}
+                          >
+                            {user.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Albums Filter */}
+                  <div>
+                    <label className="block text-sm font-semibold text-stone-800 mb-3">
+                      Albums
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {availableAlbums.length === 0 ? (
+                        <p className="text-sm text-stone-400">No albums available</p>
+                      ) : (
+                        availableAlbums.map(album => {
+                          const isSelected = selectedAlbums.includes(album.id);
+                          return (
+                            <button
+                              key={album.id}
+                              onClick={() => {
+                                if (isSelected) {
+                                  setSelectedAlbums(selectedAlbums.filter(a => a !== album.id));
+                                } else {
+                                  setSelectedAlbums([...selectedAlbums, album.id]);
+                                }
+                              }}
+                              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ease-in-out ${isSelected
+                                ? 'bg-purple-500 text-white shadow-md shadow-purple-500/30 hover:bg-purple-600'
+                                : 'bg-stone-100 text-stone-700 hover:bg-stone-200 hover:shadow-sm'
+                                }`}
+                            >
+                              {album.name}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {filteredPosts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 text-center bg-white rounded-3xl border border-stone-100 border-dashed">
@@ -301,6 +686,10 @@ function ProtectedApp() {
               onUpload={() => setView(ViewState.UPLOAD)}
               onUploadVideo={() => setView(ViewState.VIDEO_UPLOAD)}
               onPhotoClick={(photo) => setSelectedPhoto(photo)}
+              onInvite={() => {
+                setInviteAlbumId(selectedAlbum.id);
+                setShowInviteModal(true);
+              }}
             />
           </div>
         )}
@@ -345,6 +734,29 @@ function ProtectedApp() {
         />
       )}
 
+      {/* Upload Progress Widget */}
+      <UploadProgressWidget
+        onClose={(completedCount, failedCount, totalCount) => {
+          // Show toast notification with upload status
+          if (failedCount > 0) {
+            addToast(
+              `${completedCount} of ${totalCount} photos uploaded successfully. ${failedCount} failed.`,
+              'error',
+              7000
+            );
+          } else if (completedCount > 0) {
+            addToast(
+              `${completedCount} photo${completedCount > 1 ? 's' : ''} uploaded successfully!`,
+              'success',
+              5000
+            );
+          }
+        }}
+      />
+
+      {/* Toast Notifications */}
+      <ToastNotification toasts={toasts} onRemove={removeToast} />
+
       {/* Album Creation Modal */}
       <CreateAlbumModal
         isOpen={showCreateAlbumModal}
@@ -359,6 +771,14 @@ function ProtectedApp() {
         currentUserId={user?.id || ''}
         editAlbum={editAlbum}
       />
+
+      {showInviteModal && user && (
+        <InviteMemberModal
+          onClose={() => setShowInviteModal(false)}
+          albumId={inviteAlbumId}
+          currUserId={user.id}
+        />
+      )}
     </div>
   );
 }
@@ -366,7 +786,9 @@ function ProtectedApp() {
 export default function App() {
   return (
     <AuthProvider>
-      <ProtectedApp />
+      <UploadProvider>
+        <ProtectedApp />
+      </UploadProvider>
     </AuthProvider>
   );
 }

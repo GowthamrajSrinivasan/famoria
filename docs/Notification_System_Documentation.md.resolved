@@ -1,0 +1,718 @@
+# Notification System Implementation
+
+> **Document created**: January 9, 2026  
+> **Project**: Famoria - Family Photo Sharing Application
+
+## Overview
+
+The Famoria notification system provides real-time, in-app and email notifications for user interactions. The system notifies users about likes, comments, tags, mentions, and family member joins.
+
+---
+
+## Architecture
+
+The notification system consists of three main layers:
+
+```mermaid
+graph TD
+    A[User Action] --> B[Service Layer]
+    B --> C[notificationService]
+    B --> D[emailService]
+    C --> E[(Firestore notifications)]
+    D --> F[(Firestore mail queue)]
+    E --> G[Real-time Subscription]
+    G --> H[NotificationBell Component]
+    H --> I[User Interface]
+```
+
+---
+
+## Data Model
+
+### Notification Type
+
+Located in [types.ts](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/types.ts#L126-L137)
+
+```typescript
+export interface Notification {
+  id: string;                    // Auto-generated document ID
+  userId: string;                // Recipient user ID
+  type: 'like' | 'comment' | 'tag' | 'mention' | 'join';
+  actorId: string;               // User who performed the action
+  actorName: string;             // Actor's display name
+  actorAvatar?: string;          // Actor's avatar URL
+  message: string;               // Human-readable message
+  photoId?: string;              // Related photo/post ID (optional)
+  createdAt: number;             // Timestamp (milliseconds)
+  isRead: boolean;               // Read status
+}
+```
+
+### Notification Types
+
+| Type | Description | Triggered By |
+|------|-------------|--------------|
+| `like` | User liked a photo/post | Like button click |
+| `comment` | User commented on a photo | Comment submission |
+| `tag` | User was tagged in a photo | Photo upload or tag update |
+| `mention` | User was mentioned in a comment | @mention in comment |
+| `join` | New user joined family group | Invitation acceptance |
+
+---
+
+## Core Services
+
+### 1. notificationService
+
+**Location**: [services/notificationService.ts](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/notificationService.ts)
+
+#### Methods
+
+##### [createNotification(notification)](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/notificationService.ts#20-30)
+
+Creates a new notification in Firestore.
+
+```typescript
+await notificationService.createNotification({
+  userId: photoOwnerId,
+  type: 'like',
+  actorId: currentUser.id,
+  actorName: currentUser.name,
+  actorAvatar: currentUser.avatar,
+  message: `liked your memory.`,
+  photoId: photoId,
+  createdAt: Date.now(),
+  isRead: false
+});
+```
+
+**Implementation**:
+- ✅ Allows self-notifications (user can be notified of their own actions)
+- ✅ Writes directly to `notifications` Firestore collection
+- ✅ No validation against duplicate notifications
+
+##### [subscribeToNotifications(userId, callback)](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/notificationService.ts#31-51)
+
+Real-time subscription to user's notifications.
+
+```typescript
+const unsubscribe = notificationService.subscribeToNotifications(
+  userId, 
+  (notifications) => {
+    setNotifications(notifications);
+  }
+);
+```
+
+**Implementation**:
+- Uses Firestore `onSnapshot` for real-time updates
+- Queries by `userId`, ordered by `createdAt DESC`
+- Returns unsubscribe function for cleanup
+
+##### [markAsRead(notificationId)](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/notificationService.ts#52-60)
+
+Marks a single notification as read.
+
+```typescript
+await notificationService.markAsRead(notificationId);
+```
+
+##### [markAllAsRead(userId)](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/notificationService.ts#61-84)
+
+Marks all unread notifications for a user as read using batch updates.
+
+```typescript
+await notificationService.markAllAsRead(userId);
+```
+
+**Implementation**:
+- Queries all unread notifications (`isRead == false`)
+- Uses Firestore batch write for performance
+- Returns immediately if no unread notifications exist
+
+---
+
+### 2. emailService
+
+**Location**: [services/emailService.ts](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/emailService.ts)
+
+#### Methods
+
+##### [sendNotificationEmailBackground(toEmail, toName, type, data)](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/emailService.ts#56-96)
+
+Queues an email notification via Firestore mail collection (trigger-based email sending).
+
+```typescript
+await emailService.sendNotificationEmailBackground(
+  owner.email,
+  owner.name,
+  'like',
+  {
+    actorName: currentUser.name,
+    message: "Liked your memory",
+    photoUrl: window.location.href
+  }
+);
+```
+
+**Supported Types**:
+- `comment` | `tag` | `mention` | `accept_invite` | `like`
+
+**Email Content**:
+- Subject: `"New {type} on Famoria"`
+- HTML template with action button
+- Direct link to photo/content
+
+**Backend Integration**:
+- Writes to Firestore [mail](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/emailService.ts#6-55) collection
+- Email sending handled by backend Cloud Function or extension
+- Non-blocking, fire-and-forget approach
+
+---
+
+## UI Components
+
+### NotificationBell Component
+
+**Location**: [components/NotificationBell.tsx](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/components/NotificationBell.tsx)
+
+Main notification interface component.
+
+#### Features
+
+1. **Real-time subscription** to user's notifications
+2. **Unread count badge** (red dot indicator)
+3. **Dropdown menu** with notification list
+4. **Mark all read** functionality
+5. **Click-outside to close** behavior
+6. **Auto-mark as read** on notification click
+
+#### Visual States
+
+| State | UI Element |
+|-------|------------|
+| **No unread** | Bell icon only |
+| **Has unread** | Bell icon + red badge dot |
+| **Empty list** | "No notifications yet" message |
+| **Open dropdown** | Scrollable list (max-height: 384px) |
+
+#### User Interactions
+
+```typescript
+// When notification is clicked
+handleItemClick = async (notification) => {
+  if (!notification.isRead) {
+    await notificationService.markAsRead(notification.id);
+  }
+  onNotificationClick(notification); // Navigate to content
+  setIsOpen(false);
+};
+
+// Mark all as read
+handleMarkAllRead = async () => {
+  await notificationService.markAllAsRead(userId);
+};
+```
+
+---
+
+### NotificationItem Component
+
+**Location**: [components/NotificationItem.tsx](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/components/NotificationItem.tsx)
+
+Individual notification list item.
+
+#### Visual Design
+
+- **Avatar**: Actor's profile picture (with fallback to initials)
+- **Icon badge**: Type-specific icon (`❤️` like, `💬` comment, `👤` tag)
+- **Message**: "**{actorName}** {message}"
+- **Timestamp**: Relative time ("2m ago", "3h ago", "5d ago")
+- **Unread indicator**: Orange dot for unread items
+- **Background**: Orange tint (`bg-orange-50/30`) for unread
+
+---
+
+### NotificationDropdown Component
+
+**Location**: [components/NotificationDropdown.tsx](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/components/NotificationDropdown.tsx)
+
+Alternative dropdown UI with enhanced features.
+
+#### Additional Features
+
+- **Per-item mark as read** button (appears on hover)
+- **Icon indicators** with color coding:
+  - ❤️ **Like**: Red heart
+  - 💬 **Comment**: Blue message bubble
+  - 🖼️ **Tag**: Orange image icon
+  - @ **Mention**: Purple at-sign
+  - ➕ **Join**: Green user-plus icon
+
+---
+
+## Notification Triggers
+
+### 1. Like Notifications
+
+**File**: [components/LikeButton.tsx](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/components/LikeButton.tsx#L41-L65)
+
+```typescript
+// When user likes a photo
+await notificationService.createNotification({
+  userId: photoOwnerId,
+  type: 'like',
+  actorId: currentUser.id,
+  actorName: currentUser.name,
+  actorAvatar: currentUser.avatar,
+  message: `liked your memory.`,
+  photoId: photoId,
+  createdAt: Date.now(),
+  isRead: false
+});
+
+// Send email notification
+await emailService.sendNotificationEmailBackground(
+  owner.email,
+  owner.name,
+  'like',
+  { actorName: currentUser.name, message: "Liked your memory", ... }
+);
+```
+
+**Trigger**: User clicks like button on a photo/post  
+**Recipient**: Photo owner  
+**Condition**: Only when adding a like (not removing)
+
+---
+
+### 2. Comment Notifications
+
+**File**: [hooks/useInteractions.ts](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/hooks/useInteractions.ts#L84-L109)
+
+```typescript
+// When user adds a comment
+await notificationService.createNotification({
+  userId: photoOwnerId,
+  type: 'comment',
+  actorId: user.id,
+  actorName: user.name,
+  actorAvatar: user.avatar,
+  message: `commented on your memory: "${text.substring(0, 30)}..."`,
+  photoId: photoId,
+  createdAt: Date.now(),
+  isRead: false
+});
+
+// Send email notification
+await emailService.sendNotificationEmailBackground(
+  ownerProfile.email,
+  ownerProfile.name,
+  'comment',
+  { 
+    actorName: user.name, 
+    message: `commented on your photo: "${text.substring(0, 50)}..."`,
+    photoUrl: window.location.origin
+  }
+);
+```
+
+**Trigger**: User submits a comment  
+**Recipient**: Photo owner  
+**Message**: Includes first 30 characters of comment
+
+---
+
+### 3. Tag Notifications
+
+**File**: [services/photoService.ts](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/photoService.ts#L224-L265)
+
+```typescript
+// When users are tagged in a photo
+await photoService.notifyTaggedUsers(post, currentUser);
+
+// Internal implementation
+for (const taggedUser of usersToNotify) {
+  // In-app notification
+  await notificationService.createNotification({
+    userId: taggedUser.userId,
+    type: 'tag',
+    actorId: actor.id,
+    actorName: actor.name,
+    actorAvatar: actor.avatar,
+    message: `tagged you in a new memory.`,
+    photoId: item.id,
+    createdAt: Date.now(),
+    isRead: false
+  });
+
+  // Email notification
+  const userProfile = await userService.getUser(taggedUser.userId);
+  if (userProfile?.email) {
+    await emailService.sendNotificationEmailBackground(
+      userProfile.email,
+      userProfile.name,
+      'tag',
+      {
+        actorName: actor.name,
+        message: `tagged you in a new memory.`,
+        photoUrl: window.location.href
+      }
+    );
+  }
+}
+```
+
+**Trigger**: 
+- Photo upload with tagged users
+- Adding tags to existing photo
+
+**Recipients**: All tagged users  
+**Feature**: Supports notifying only newly added tags (delta notifications)
+
+---
+
+### 4. Join Notifications
+
+**File**: [services/invitationService.ts](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/invitationService.ts#L178-L231)
+
+```typescript
+// When user accepts family invitation
+const newUser = await userService.getUser(userId);
+
+// 1. Notify the inviter
+await notificationService.createNotification({
+  userId: invite.invitedBy,
+  type: 'join',
+  actorId: newUser.id,
+  actorName: newUser.name,
+  actorAvatar: newUser.avatar,
+  message: `accepted your invitation.`,
+  createdAt: Date.now(),
+  isRead: false
+});
+
+// 2. Notify all family members
+const members = await familyService.getFamilyMembers(invite.familyGroupId);
+for (const member of members) {
+  if (member.userId !== userId) {
+    await notificationService.createNotification({
+      userId: member.userId,
+      type: 'join',
+      actorId: newUser.id,
+      actorName: newUser.name,
+      actorAvatar: newUser.avatar,
+      message: `has joined the family.`,
+      createdAt: Date.now(),
+      isRead: false
+    });
+  }
+}
+
+// 3. Email the inviter
+const inviter = await userService.getUser(invite.invitedBy);
+if (inviter?.email) {
+  await emailService.sendNotificationEmailBackground(
+    inviter.email,
+    inviter.name,
+    'accept_invite',
+    {
+      actorName: newUser.name,
+      message: "Invitation accepted",
+      photoUrl: window.location.origin
+    }
+  );
+}
+```
+
+**Trigger**: User accepts family group invitation  
+**Recipients**: 
+1. Inviter (special notification)
+2. All existing family members
+
+---
+
+## Database Structure
+
+### Firestore Collections
+
+#### `notifications` Collection
+
+```
+notifications/
+├── {notificationId1}
+│   ├── userId: "user123"
+│   ├── type: "like"
+│   ├── actorId: "user456"
+│   ├── actorName: "John Doe"
+│   ├── actorAvatar: "https://..."
+│   ├── message: "liked your memory."
+│   ├── photoId: "photo789"
+│   ├── createdAt: 1704783600000
+│   └── isRead: false
+├── {notificationId2}
+│   └── ...
+```
+
+**Indexes Required**:
+- Composite index: `userId ASC, createdAt DESC`
+- Composite index: `userId ASC, isRead ASC` (for markAllAsRead)
+
+#### [mail](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/emailService.ts#6-55) Collection (Email Queue)
+
+```
+mail/
+├── {mailId1}
+│   ├── to: ["user@example.com"]
+│   ├── message:
+│   │   ├── subject: "New like on Famoria"
+│   │   ├── text: "..."
+│   │   └── html: "<div>...</div>"
+│   ├── metadata: { ... }
+│   └── createdAt: 1704783600000
+```
+
+**Backend Processing**:
+- Processed by Cloud Functions or Firestore extensions
+- Documents are deleted after successful delivery
+- Failed deliveries are logged with error fields
+
+---
+
+## Notification Flow Diagrams
+
+### Like Notification Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant LikeButton
+    participant notificationService
+    participant emailService
+    participant Firestore
+    participant PhotoOwner
+
+    User->>LikeButton: Click like
+    LikeButton->>notificationService: createNotification()
+    notificationService->>Firestore: Write to notifications/
+    Firestore-->>PhotoOwner: Real-time update
+    LikeButton->>emailService: sendNotificationEmailBackground()
+    emailService->>Firestore: Write to mail/
+    Note over Firestore: Cloud Function processes email
+```
+
+### Tag Notification Flow
+
+```mermaid
+sequenceDiagram
+    participant Uploader
+    participant photoService
+    participant notificationService
+    participant emailService
+    participant TaggedUsers
+
+    Uploader->>photoService: Upload with tags
+    photoService->>photoService: notifyTaggedUsers()
+    loop For each tagged user
+        photoService->>notificationService: createNotification()
+        photoService->>emailService: sendNotificationEmailBackground()
+    end
+    notificationService->>TaggedUsers: Real-time notifications
+```
+
+---
+
+## Best Practices
+
+### 1. Error Handling
+
+All notification calls use try-catch to prevent blocking main flows:
+
+```typescript
+try {
+  await notificationService.createNotification({ ... });
+  await emailService.sendNotificationEmailBackground(...);
+} catch (err) {
+  console.warn("Failed to send notification", err);
+  // Continue - notification failure shouldn't break the main action
+}
+```
+
+### 2. Performance Optimization
+
+- **Batch updates**: Use [markAllAsRead](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/notificationService.ts#61-84) with batch writes
+- **Fire-and-forget**: Email sending is async via queue
+- **Real-time updates**: Firestore snapshots provide instant UI updates
+- **Optimistic UI**: UI updates before server confirmation
+
+### 3. User Experience
+
+- **Self-notifications allowed**: Users can see their own tags/actions
+- **Unread indicators**: Clear visual feedback for new notifications
+- **Auto-mark read**: Clicking a notification marks it as read
+- **Relative timestamps**: "2m ago" is more readable than absolute time
+- **Click-outside close**: Dropdown closes on outside clicks
+
+---
+
+## Configuration
+
+### Firestore Security Rules
+
+```javascript
+// notifications collection
+match /notifications/{notificationId} {
+  // Users can read their own notifications
+  allow read: if request.auth != null 
+              && request.auth.uid == resource.data.userId;
+  
+  // Anyone authenticated can create notifications
+  allow create: if request.auth != null;
+  
+  // Users can update their own notifications (mark as read)
+  allow update: if request.auth != null 
+                && request.auth.uid == resource.data.userId;
+}
+```
+
+### Email Templates
+
+Email templates are embedded in [emailService.ts](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/emailService.ts) and use inline styles for compatibility.
+
+**Customization Points**:
+- Subject line format
+- HTML template structure
+- Button styling
+- Footer text
+- Color scheme
+
+---
+
+## Testing Checklist
+
+- [ ] Like a photo → Owner receives notification
+- [ ] Comment on photo → Owner receives notification
+- [ ] Tag user in photo → Tagged user receives notification
+- [ ] Accept invitation → Inviter and family receive notifications
+- [ ] Mark notification as read → Badge count decreases
+- [ ] Mark all as read → All notifications marked
+- [ ] Email delivery → Check Firestore mail queue
+- [ ] Real-time updates → Notification appears without refresh
+- [ ] Click notification → Navigates to correct photo
+- [ ] Self-notifications → User sees their own tags
+
+---
+
+## Future Enhancements
+
+### Potential Improvements
+
+1. **Push Notifications**: Browser push notifications for web, FCM for mobile
+2. **Notification Preferences**: User settings to control which notifications to receive
+3. **Notification Grouping**: Combine similar notifications ("John and 5 others liked your photo")
+4. **Rich Media**: Include photo thumbnails in notification list
+5. **Delete Notifications**: Allow users to dismiss/delete individual notifications
+6. **Notification History**: Archive and search past notifications
+7. **Read Receipts**: Track when notifications were viewed
+8. **Sound/Vibration**: Audio/haptic feedback for new notifications
+9. **Digest Emails**: Daily/weekly summary emails instead of per-action
+10. **Smart Batching**: Delay notifications to batch rapid actions
+
+---
+
+## Dependencies
+
+### External Libraries
+
+- **Firebase/Firestore**: Real-time database and subscriptions
+- **Lucide React**: Icon library for notification type icons
+- **nanoid**: Unique ID generation (used in invitation codes)
+
+### Internal Services
+
+- `userService`: Fetch user profile data for email notifications
+- `familyService`: Fetch family members for join notifications
+- `storageService`: Not directly used but part of overall architecture
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### Notifications not appearing
+
+**Symptoms**: New notifications don't show up in real-time
+
+**Solutions**:
+1. Check Firestore security rules allow read access
+2. Verify `userId` matches authenticated user
+3. Check browser console for subscription errors
+4. Ensure component is properly subscribed on mount
+
+#### Emails not sending
+
+**Symptoms**: In-app notifications work but emails don't arrive
+
+**Solutions**:
+1. Check Firestore [mail](file:///Users/gowthamrajsrinivasan/Downloads/famoria%202/services/emailService.ts#6-55) collection for queued documents
+2. Verify backend email processing function is deployed
+3. Check user email exists in profile
+4. Review email service logs for delivery errors
+
+#### Duplicate notifications
+
+**Symptoms**: Multiple notifications for single action
+
+**Solutions**:
+1. Ensure notification creation is not called multiple times
+2. Check for duplicate event listeners
+3. Add deduplication logic based on `photoId` + `type` + `actorId`
+
+#### Real-time not updating
+
+**Symptoms**: Need to refresh page to see notifications
+
+**Solutions**:
+1. Verify `onSnapshot` is properly initialized
+2. Check cleanup function is called on unmount
+3. Ensure Firestore indexes are created
+4. Test network connectivity
+
+---
+
+## Metrics & Monitoring
+
+### Key Metrics to Track
+
+1. **Notification Delivery Rate**: % of created notifications successfully delivered
+2. **Email Delivery Rate**: % of queued emails successfully sent
+3. **Time to Notification**: Latency from action to notification appearance
+4. **Read Rate**: % of notifications marked as read
+5. **Click-through Rate**: % of notifications clicked by users
+6. **Error Rate**: Failed notification/email attempts
+
+### Logging
+
+Current logging points:
+- `[NotificationService]` prefix in console logs
+- Subscription errors logged to console
+- Email queue errors logged to console
+
+**Recommended**: Integrate with application monitoring (e.g., Sentry, LogRocket)
+
+---
+
+## Summary
+
+The Famoria notification system provides a robust, real-time notification experience with the following key features:
+
+✅ **Real-time in-app notifications** via Firestore subscriptions  
+✅ **Email notifications** via background queue processing  
+✅ **Multiple notification types**: likes, comments, tags, mentions, joins  
+✅ **Read status tracking** with batch updates  
+✅ **Rich UI components** with unread indicators and dropdowns  
+✅ **Error-resilient design** with try-catch wrappers  
+✅ **Scalable architecture** using Firestore and Cloud Functions  
+
+The system is production-ready and handles the core notification use cases for a family photo-sharing application.

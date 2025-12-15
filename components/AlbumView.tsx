@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Upload, Edit, Trash2, MoreVertical, Image as ImageIcon, Lock, KeyRound, Video, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Upload, Edit, Trash2, MoreVertical, Image as ImageIcon, Lock, KeyRound, Video, ChevronDown, ArrowUpDown, Filter, X, Users } from 'lucide-react';
 import { Album, Post, Video as VideoType } from '../types';
 import { PhotoCard } from './PhotoCard';
 import { VideoCard } from './VideoCard';
@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { Button } from './Button';
 import { VaultUnlockModal } from './VaultUnlockModal';
 import { VideoLightbox } from './VideoLightbox';
+import { userService } from '../services/userService';
 
 interface AlbumViewProps {
     album: Album;
@@ -20,6 +21,7 @@ interface AlbumViewProps {
     onUpload: () => void;
     onUploadVideo?: () => void;
     onPhotoClick: (photo: Post) => void;
+    onInvite?: () => void;
 }
 
 export const AlbumView: React.FC<AlbumViewProps> = ({
@@ -31,19 +33,27 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     onDelete,
     onUpload,
     onUploadVideo,
-    onPhotoClick
+    onPhotoClick,
+    onInvite
 }) => {
     const { getAlbumKey, unlockAlbum, autoUnlockAlbum } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
     const [videos, setVideos] = useState<VideoType[]>([]);
     const [selectedVideo, setSelectedVideo] = useState<VideoType | null>(null);
     const [filterMode, setFilterMode] = useState<'all' | 'photos' | 'videos'>('all');
+    const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'liked' | 'commented'>('newest');
     const [loading, setLoading] = useState(true);
     const [showMenu, setShowMenu] = useState(false);
     const [showUploadMenu, setShowUploadMenu] = useState(false);
     const [showUnlock, setShowUnlock] = useState(false);
     const [checkingVault, setCheckingVault] = useState(false);
     const hasAttemptedUnlock = React.useRef(false);
+
+    // Filter state
+    const [selectedTags, setSelectedTags] = useState<string[]>([]);
+    const [selectedUploaders, setSelectedUploaders] = useState<string[]>([]);
+    const [availableUsers, setAvailableUsers] = useState<{ id: string, name: string }[]>([]);
+    const [showFilters, setShowFilters] = useState(false);
 
     const isOwner = currentUserId === album.createdBy;
     const albumKey = getAlbumKey(album.id);
@@ -121,6 +131,19 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
         }
     }, [albumKey, album.id]);
 
+    // Fetch users for filter
+    useEffect(() => {
+        const fetchUsers = async () => {
+            try {
+                const users = await userService.getAllUsers();
+                setAvailableUsers(users.map(u => ({ id: u.id, name: u.name })));
+            } catch (error) {
+                console.error('[AlbumView] Error fetching users:', error);
+            }
+        };
+        fetchUsers();
+    }, []);
+
     const handleUnlockSuccess = (key: Uint8Array) => {
         unlockAlbum(album.id, key);
         // Effect will trigger decryption
@@ -154,6 +177,52 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
             console.error('Failed to toggle like:', error);
         }
     };
+
+    // Extract unique tags from posts and videos
+    const uniqueTags = Array.from(new Set([
+        ...posts.flatMap(p => p.tags),
+        ...videos.flatMap(v => v.tags)
+    ]));
+
+    // Count active filters
+    const activeFilterCount = selectedTags.length + selectedUploaders.length;
+
+    // Clear all filters
+    const clearFilters = () => {
+        setSelectedTags([]);
+        setSelectedUploaders([]);
+    };
+
+    // Apply filters to posts
+    const getFilteredPosts = () => {
+        let result = posts;
+
+        if (selectedTags.length > 0) {
+            result = result.filter(p => selectedTags.some(tag => p.tags.includes(tag)));
+        }
+
+        if (selectedUploaders.length > 0) {
+            result = result.filter(p => selectedUploaders.includes(p.authorId));
+        }
+
+        return result;
+    };
+
+    // Apply filters to videos
+    const getFilteredVideos = () => {
+        let result = videos;
+
+        if (selectedTags.length > 0) {
+            result = result.filter(v => selectedTags.some(tag => v.tags.includes(tag)));
+        }
+
+        if (selectedUploaders.length > 0) {
+            result = result.filter(v => selectedUploaders.includes(v.uploadedBy));
+        }
+
+        return result;
+    };
+
 
     return (
         <div className="w-full">
@@ -251,46 +320,56 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                         </div>
 
                         {isOwner && (
-                            <div className="relative">
+                            <div className="flex items-center gap-2">
                                 <button
-                                    onClick={() => setShowMenu(!showMenu)}
-                                    className="p-3 hover:bg-stone-100 rounded-xl transition-colors"
+                                    onClick={onInvite}
+                                    className="p-3 hover:bg-stone-100 rounded-xl transition-colors text-stone-600 hover:text-stone-800"
+                                    title="Invite Members"
                                 >
-                                    <MoreVertical size={20} className="text-stone-600" />
+                                    <Users size={20} />
                                 </button>
 
-                                {showMenu && (
-                                    <>
-                                        <div
-                                            className="fixed inset-0 z-40"
-                                            onClick={() => setShowMenu(false)}
-                                        />
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setShowMenu(!showMenu)}
+                                        className="p-3 hover:bg-stone-100 rounded-xl transition-colors"
+                                    >
+                                        <MoreVertical size={20} className="text-stone-600" />
+                                    </button>
 
-                                        <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-2xl border border-stone-200 py-2 w-48 z-50 max-h-[300px] overflow-y-auto">
-                                            <button
-                                                onClick={() => {
-                                                    setShowMenu(false);
-                                                    onEdit();
-                                                }}
-                                                className="w-full px-4 py-3 text-left text-sm text-stone-700 hover:bg-stone-50 flex items-center gap-3 transition-colors"
-                                            >
-                                                <Edit size={16} />
-                                                <span className="font-medium">Edit Album</span>
-                                            </button>
-                                            <div className="h-px bg-stone-200 mx-2" />
-                                            <button
-                                                onClick={() => {
-                                                    setShowMenu(false);
-                                                    onDelete();
-                                                }}
-                                                className="w-full px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                                            >
-                                                <Trash2 size={16} />
-                                                <span className="font-medium">Delete Album</span>
-                                            </button>
-                                        </div>
-                                    </>
-                                )}
+                                    {showMenu && (
+                                        <>
+                                            <div
+                                                className="fixed inset-0 z-40"
+                                                onClick={() => setShowMenu(false)}
+                                            />
+
+                                            <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-2xl border border-stone-200 py-2 w-48 z-50 max-h-[300px] overflow-y-auto">
+                                                <button
+                                                    onClick={() => {
+                                                        setShowMenu(false);
+                                                        onEdit();
+                                                    }}
+                                                    className="w-full px-4 py-3 text-left text-sm text-stone-700 hover:bg-stone-50 flex items-center gap-3 transition-colors"
+                                                >
+                                                    <Edit size={16} />
+                                                    <span className="font-medium">Edit Album</span>
+                                                </button>
+                                                <div className="h-px bg-stone-200 mx-2" />
+                                                <button
+                                                    onClick={() => {
+                                                        setShowMenu(false);
+                                                        onDelete();
+                                                    }}
+                                                    className="w-full px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                                >
+                                                    <Trash2 size={16} />
+                                                    <span className="font-medium">Delete Album</span>
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -298,35 +377,183 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
             </div>
 
             {/* Filter Buttons */}
-            <div className="mb-6 flex items-center gap-2 bg-stone-100 p-1.5 rounded-xl w-fit">
-                <button
-                    onClick={() => setFilterMode('all')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${filterMode === 'all'
-                        ? 'bg-white text-stone-800 shadow-sm'
-                        : 'text-stone-500 hover:text-stone-700'
-                        }`}
-                >
-                    All
-                </button>
-                <button
-                    onClick={() => setFilterMode('photos')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${filterMode === 'photos'
-                        ? 'bg-white text-stone-800 shadow-sm'
-                        : 'text-stone-500 hover:text-stone-700'
-                        }`}
-                >
-                    Photos
-                </button>
-                <button
-                    onClick={() => setFilterMode('videos')}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${filterMode === 'videos'
-                        ? 'bg-white text-stone-800 shadow-sm'
-                        : 'text-stone-500 hover:text-stone-700'
-                        }`}
-                >
-                    Videos
-                </button>
+            <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-4 justify-between">
+                <div className="flex items-center gap-2 bg-stone-100 p-1.5 rounded-xl">
+                    <button
+                        onClick={() => setFilterMode('all')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${filterMode === 'all'
+                            ? 'bg-white text-stone-800 shadow-sm'
+                            : 'text-stone-500 hover:text-stone-700'
+                            }`}
+                    >
+                        All
+                    </button>
+                    <button
+                        onClick={() => setFilterMode('photos')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${filterMode === 'photos'
+                            ? 'bg-white text-stone-800 shadow-sm'
+                            : 'text-stone-500 hover:text-stone-700'
+                            }`}
+                    >
+                        Photos
+                    </button>
+                    <button
+                        onClick={() => setFilterMode('videos')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${filterMode === 'videos'
+                            ? 'bg-white text-stone-800 shadow-sm'
+                            : 'text-stone-500 hover:text-stone-700'
+                            }`}
+                    >
+                        Videos
+                    </button>
+                </div>
+
+                {/* Sort Dropdown */}
+                <div className="flex items-center gap-3">
+                    <ArrowUpDown size={16} className="text-stone-400" />
+                    <span className="text-sm font-medium text-stone-600">Sort by:</span>
+                    <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as any)}
+                        className="px-4 py-2 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
+                    >
+                        <option value="newest">Newest First</option>
+                        <option value="oldest">Oldest First</option>
+                        <option value="liked">Most Liked</option>
+                        <option value="commented">Most Commented</option>
+                    </select>
+                </div>
+
+                {/* Filter Button */}
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setShowFilters(!showFilters)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeFilterCount > 0
+                            ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                            : 'bg-white border border-stone-200 text-stone-700 hover:border-stone-300'
+                            }`}
+                    >
+                        <Filter size={16} />
+                        <span>Filters</span>
+                        {activeFilterCount > 0 && (
+                            <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                {activeFilterCount}
+                            </span>
+                        )}
+                    </button>
+                    {activeFilterCount > 0 && (
+                        <button
+                            onClick={clearFilters}
+                            className="text-sm text-stone-500 hover:text-stone-700 font-medium"
+                        >
+                            Clear
+                        </button>
+                    )}
+                </div>
             </div>
+
+            {/* Active Filter Chips */}
+            {activeFilterCount > 0 && (
+                <div className="flex flex-wrap gap-2 items-center mb-6 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <span className="text-sm font-medium text-stone-600">Active filters:</span>
+                    {selectedTags.map(tag => {
+                        const user = availableUsers.find(u => u.id === tag);
+                        const displayName = user?.name || tag;
+                        return (
+                            <div key={tag} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-full text-sm font-medium transition-all hover:bg-orange-200">
+                                <span>{displayName}</span>
+                                <button onClick={() => setSelectedTags(selectedTags.filter(t => t !== tag))} className="hover:text-orange-900 transition-colors">
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        );
+                    })}
+                    {selectedUploaders.map(uploaderId => {
+                        const user = availableUsers.find(u => u.id === uploaderId);
+                        return (
+                            <div key={uploaderId} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-sm font-medium transition-all hover:bg-blue-200">
+                                <span>{user?.name || uploaderId}</span>
+                                <button onClick={() => setSelectedUploaders(selectedUploaders.filter(u => u !== uploaderId))} className="hover:text-blue-900 transition-colors">
+                                    <X size={14} />
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {/* Filter Panel */}
+            {showFilters && (
+                <div className="bg-white border border-stone-200 rounded-2xl p-8 shadow-lg shadow-stone-200/50 mb-6 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {/* Tags Filter */}
+                        <div>
+                            <label className="block text-sm font-semibold text-stone-800 mb-3">
+                                Tagged People
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                                {uniqueTags.length === 0 ? (
+                                    <p className="text-sm text-stone-400">No tags available</p>
+                                ) : (
+                                    uniqueTags.map(tag => {
+                                        const user = availableUsers.find(u => u.id === tag);
+                                        const displayName = user?.name || tag;
+                                        const isSelected = selectedTags.includes(tag);
+                                        return (
+                                            <button
+                                                key={tag}
+                                                onClick={() => {
+                                                    if (isSelected) {
+                                                        setSelectedTags(selectedTags.filter(t => t !== tag));
+                                                    } else {
+                                                        setSelectedTags([...selectedTags, tag]);
+                                                    }
+                                                }}
+                                                className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ease-in-out ${isSelected
+                                                    ? 'bg-orange-500 text-white shadow-md shadow-orange-500/30 hover:bg-orange-600'
+                                                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200 hover:shadow-sm'
+                                                    }`}
+                                            >
+                                                {displayName}
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Uploader Filter */}
+                        <div>
+                            <label className="block text-sm font-semibold text-stone-800 mb-3">
+                                Uploaded By
+                            </label>
+                            <div className="flex flex-wrap gap-2">
+                                {availableUsers.map(user => {
+                                    const isSelected = selectedUploaders.includes(user.id);
+                                    return (
+                                        <button
+                                            key={user.id}
+                                            onClick={() => {
+                                                if (isSelected) {
+                                                    setSelectedUploaders(selectedUploaders.filter(u => u !== user.id));
+                                                } else {
+                                                    setSelectedUploaders([...selectedUploaders, user.id]);
+                                                }
+                                            }}
+                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ease-in-out ${isSelected
+                                                ? 'bg-blue-500 text-white shadow-md shadow-blue-500/30 hover:bg-blue-600'
+                                                : 'bg-stone-100 text-stone-700 hover:bg-stone-200 hover:shadow-sm'
+                                                }`}
+                                        >
+                                            {user.name}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Content Grid */}
             {loading ? (
@@ -371,33 +598,67 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 animate-fade-in-up">
                     {/* Render Photos */}
-                    {(filterMode === 'all' || filterMode === 'photos') && posts.map((post) => (
-                        <PhotoCard
-                            key={post.id}
-                            photo={post}
-                            onClick={() => onPhotoClick(post)}
-                            currentUser={currentUser}
-                            onDelete={async (photoId) => {
-                                await photoService.deletePhoto(photoId);
-                            }}
-                            onSetCover={async (photoUrl) => {
-                                // Set cover logic would go here
-                                console.log('Set cover:', photoUrl);
-                            }}
-                            showCoverOption={isOwner}
-                        />
-                    ))}
+                    {(filterMode === 'all' || filterMode === 'photos') && (() => {
+                        const filteredPosts = getFilteredPosts();
+                        const sortedPosts = [...filteredPosts].sort((a, b) => {
+                            switch (sortBy) {
+                                case 'newest':
+                                    return b.createdAt - a.createdAt;
+                                case 'oldest':
+                                    return a.createdAt - b.createdAt;
+                                case 'liked':
+                                    return (b.likes?.length || 0) - (a.likes?.length || 0);
+                                case 'commented':
+                                    return (b.commentsCount || 0) - (a.commentsCount || 0);
+                                default:
+                                    return 0;
+                            }
+                        });
+                        return sortedPosts.map((post) => (
+                            <PhotoCard
+                                key={post.id}
+                                photo={post}
+                                onClick={() => onPhotoClick(post)}
+                                currentUser={currentUser}
+                                onDelete={async (photoId) => {
+                                    await photoService.deletePhoto(photoId);
+                                }}
+                                onSetCover={async (photoUrl) => {
+                                    // Set cover logic would go here
+                                    console.log('Set cover:', photoUrl);
+                                }}
+                                showCoverOption={isOwner}
+                            />
+                        ));
+                    })()}
                     {/* Render Videos */}
-                    {(filterMode === 'all' || filterMode === 'videos') && videos.map((video) => (
-                        <VideoCard
-                            key={video.id}
-                            video={video}
-                            currentUser={currentUser}
-                            onClick={() => handleVideoClick(video)}
-                            onDelete={handleVideoDelete}
-                            onLike={handleVideoLike}
-                        />
-                    ))}
+                    {(filterMode === 'all' || filterMode === 'videos') && (() => {
+                        const filteredVideos = getFilteredVideos();
+                        const sortedVideos = [...filteredVideos].sort((a, b) => {
+                            switch (sortBy) {
+                                case 'newest':
+                                    return (b.createdAt?.toMillis?.() || b.uploadDate?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || a.uploadDate?.toMillis?.() || 0);
+                                case 'oldest':
+                                    return (a.createdAt?.toMillis?.() || a.uploadDate?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || b.uploadDate?.toMillis?.() || 0);
+                                case 'liked':
+                                    return (b.likes?.length || 0) - (a.likes?.length || 0);
+                                case 'commented':
+                                    return (b.commentsCount || 0) - (a.commentsCount || 0);
+                                default:
+                                    return 0;
+                            }
+                        });
+                        return sortedVideos.map((video) => (
+                            <VideoCard
+                                key={video.id}
+                                video={video}
+                                currentUser={currentUser}
+                                onClick={() => handleVideoClick(video)}
+                                onDelete={handleVideoDelete}
+                                onLike={handleVideoLike}
+                            />
+                        ));
+                    })()}
                 </div>
             )}
 

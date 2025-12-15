@@ -15,6 +15,8 @@ import { db } from '../lib/firebase';
 import * as imageUtils from '../lib/imageUtils';
 import * as keyModule from '../lib/crypto/photoKey';
 import * as cryptoModule from '../lib/crypto/photoCrypto';
+import { processInParallel } from '../lib/processInParallel';
+import { useUpload } from '../context/UploadContext';
 
 interface UploaderProps {
   onUploadComplete: (posts: Post[]) => void; // Changed to Post[] for parallel uploads
@@ -53,12 +55,12 @@ interface ValidationError {
 
 export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, currentAlbumId }) => {
   const { user, getAlbumKey, unlockAlbum, googleAccessToken, refreshDriveToken } = useAuth();
+  const { addUploads } = useUpload();
   const [isDragging, setIsDragging] = useState(false);
   const [filesToUpload, setFilesToUpload] = useState<File[]>([]); // Changed to array
   const [previews, setPreviews] = useState<string[]>([]); // Array of preview URLs
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<string>(''); // "2/5 photos uploaded"
+  const [isQueueing, setIsQueueing] = useState(false); // Changed from isUploading
   const [analysis, setAnalysis] = useState<{ caption: string; tags: string[]; album: string } | null>(null);
   const [validationError, setValidationError] = useState<ValidationError | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -379,134 +381,38 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       return;
     }
 
-    setIsUploading(true);
-    setUploadProgress('');
+    setIsQueueing(true);
 
     try {
       const albumId = selectedAlbumId;
-      console.log(`[Upload] Starting upload of ${filesToUpload.length} photos to album ${albumId} (single post with carousel)`);
+      console.log(`[Upload] Queueing ${filesToUpload.length} photos for background upload to album ${albumId}`);
 
-      // 1. Create a single post shell first
-      const postData: Omit<Post, 'id'> = {
-        albumId: albumId,
-        caption: analysis.caption,
-        tags: analysis.tags,
-        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        author: user.name,
-        authorId: user.id,
-        photoIds: [], // Will populate after uploading photos
-        coverPhotoId: '',
-        createdAt: Date.now(),
-        isEncrypted: true,
-        likes: [],
-        commentsCount: 0
-      };
-
-      const createdPost = await photoService.createPost(postData);
-      console.log(`[Upload] Created post shell: ${createdPost.id}`);
-
-      const encryptedPhotoRecords = [];
-
-      // 2. Process and upload all photos for this single post
-      for (let i = 0; i < filesToUpload.length; i++) {
-        const file = filesToUpload[i];
-        setUploadProgress(`Processing ${i + 1}/${filesToUpload.length} photos...`);
-
-        // Generate unique ID for this photo
-        const photoId = crypto.randomUUID();
-        const fileName = `${Date.now()}_${photoId}.enc`;
-        const storagePath = `albums/${albumId}/photos/${fileName}`;
-        const thumbnailPath = storageService.getThumbnailPath(storagePath);
-
-        console.log(`[Upload] Processing photo ${i + 1}/${filesToUpload.length}: ${photoId}`);
-
-        // Generate Thumbnail
-        const thumbnail = await imageUtils.generateThumbnail(file, 400, 0.8);
-
-        // Derive Key & Encrypt
-        const photoKey = await keyModule.derivePhotoKey(albumKey, photoId);
-
-        // Encrypt full image
-        const encryptedFile = await cryptoModule.encryptFile(file, photoKey);
-
-        // Encrypt thumbnail
-        const thumbnailFile = new File([thumbnail], 'thumbnail.webp', { type: 'image/webp' });
-        const encryptedThumbnail = await cryptoModule.encryptFile(thumbnailFile, photoKey);
-
-        // Encrypt Metadata
-        const metadata = {
-          caption: analysis.caption,
-          tags: analysis.tags,
-          date: new Date().toISOString(),
-          author: user.name,
-          authorId: user.id
-        };
-        const encMeta = await cryptoModule.encryptMetadata(metadata, photoKey);
-
-        // Upload encrypted files
-        setUploadProgress(`Uploading ${i + 1}/${filesToUpload.length}...`);
-        await storageService.uploadWithCaching(encryptedFile, storagePath);
-        await storageService.uploadWithCaching(encryptedThumbnail, thumbnailPath);
-
-        const encryptedPhotoRecord = {
-          id: photoId,
-          albumId: albumId,
-          version: 1,
-          createdAt: Date.now(),
-          encryptedPath: storagePath,
-          thumbnailPath: thumbnailPath,
-          encryptedMetadata: encMeta.encrypted,
-          metadataIv: encMeta.iv,
-          metadataAuthTag: encMeta.authTag,
-          photoIv: encMeta.photoIv || "",
-          authorId: user.id
-        };
-
-        encryptedPhotoRecords.push(encryptedPhotoRecord);
-        console.log(`[Upload] Photo ${i + 1}/${filesToUpload.length} uploaded: ${photoId}`);
-      }
-
-      // 3. Save ALL photos to album subcollection with the post ID
-      console.log(`[Upload] Saving ${encryptedPhotoRecords.length} photos to album subcollection...`);
-      const savedPhotos = await photoService.addPhotosToPost(
+      // Queue uploads for background processing
+      await addUploads(
+        filesToUpload,
         albumId,
-        createdPost.id,
-        encryptedPhotoRecords
+        albumKey,
+        {
+          caption: analysis.caption,
+          tags: analysis.tags
+        },
+        user
       );
 
-      // 4. Update the post with all photo IDs
-      const uploadedPhotoIds = savedPhotos.map(p => p.id);
-      createdPost.photoIds = uploadedPhotoIds;
-      createdPost.coverPhotoId = uploadedPhotoIds[0];
+      console.log(`[Upload] ✅ All uploads queued successfully! Closing modal...`);
 
-      const postRef = doc(db, 'posts', createdPost.id);
-      await updateDoc(postRef, {
-        photoIds: uploadedPhotoIds,
-        coverPhotoId: uploadedPhotoIds[0]
-      });
-
-      console.log(`[Upload] Post updated with ${uploadedPhotoIds.length} photo IDs`);
-
-      // 5. Update Album Photo Count (increment by total number of photos)
-      const albumRef = doc(db, 'albums', albumId);
-      await updateDoc(albumRef, {
-        photoCount: increment(filesToUpload.length),
-        updatedAt: Date.now()
-      });
-
-      console.log(`[Upload] Upload complete: 1 post created with ${uploadedPhotoIds.length} photos`);
-      onUploadComplete([createdPost]);
+      // Close modal immediately - uploads continue in background
+      onCancel();
 
     } catch (error: any) {
-      console.error("Upload failed", error);
+      console.error("Upload queue failed", error);
       setValidationError({
         title: 'Upload Failed',
-        message: error.message || "Failed to upload secure photos.",
+        message: error.message || "Failed to queue secure photos.",
         suggestion: 'Please try again.'
       });
     } finally {
-      setIsUploading(false);
-      setUploadProgress('');
+      setIsQueueing(false);
     }
   };
 
@@ -814,15 +720,10 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                 </div>
 
                 <div className="pt-8 mt-8 border-t border-stone-100">
-                  {uploadProgress && (
-                    <div className="mb-4 text-center text-sm text-orange-600 font-medium">
-                      {uploadProgress}
-                    </div>
-                  )}
                   <Button
                     onClick={handleSave}
-                    disabled={isAnalyzing || !analysis || isUploading || !selectedAlbumId || filesToUpload.length === 0}
-                    isLoading={isUploading}
+                    disabled={isAnalyzing || !analysis || isQueueing || !selectedAlbumId || filesToUpload.length === 0}
+                    isLoading={isQueueing}
                     className="w-full py-4 text-base shadow-xl shadow-orange-500/20 hover:shadow-orange-500/30 active:scale-[0.98]"
                   >
                     <Check size={20} className="mr-2" />

@@ -10,7 +10,7 @@ export const userService = {
     try {
       const userRef = doc(db, USERS_COLLECTION, userId);
       const userSnap = await getDoc(userRef);
-      
+
       if (userSnap.exists()) {
         const data = userSnap.data();
         return {
@@ -48,6 +48,24 @@ export const userService = {
     } catch (error) {
       console.error("Error fetching all users", error);
       return [];
+    }
+  },
+
+  getUserById: async (userId: string): Promise<User | null> => {
+    try {
+      const userRef = doc(db, USERS_COLLECTION, userId);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists()) {
+        return {
+          id: userSnap.id,
+          ...userSnap.data()
+        } as User;
+      }
+      return null;
+    } catch (error) {
+      console.error("Error fetching user by ID", error);
+      return null;
     }
   }
 };

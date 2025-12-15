@@ -42,6 +42,7 @@ export interface Post {
   isEncrypted?: boolean;
   likes?: string[];
   commentsCount?: number;
+  uploadStatus?: 'uploading' | 'complete'; // Track upload state for background uploads
 }
 
 export interface User {
@@ -124,13 +125,25 @@ export interface AIAnalysisResult {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'like' | 'comment' | 'tag' | 'mention';
+  type: 'like' | 'comment' | 'tag' | 'mention' | 'join';
+  actorId: string;
   actorName: string;
   actorAvatar?: string;
   message: string;
   photoId?: string;
   createdAt: number;
   isRead: boolean;
+}
+
+
+export interface Invitation {
+  id: string; // Token
+  email: string;
+  invitedBy: string; // User ID
+  albumId?: string; // Optional: if inviting to specific album
+  status: 'pending' | 'accepted' | 'expired';
+  createdAt: number;
+  expiresAt: number; // e.g., 7 days
 }
 
 export interface Group {

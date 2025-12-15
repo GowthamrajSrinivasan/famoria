@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import { interactionService } from '../services/interactionService';
+import { notificationService } from '../services/notificationService';
+import { emailService } from '../services/emailService';
+import { userService } from '../services/userService';
 import { Comment } from '../types';
 
-export const useLikes = (photoId: string, currentUserId?: string, collectionName: string = 'photos') => {
+export const useLikes = (photoId: string, currentUserId?: string, collectionName: string = 'photos', post?: any) => {
   const [likes, setLikes] = useState<string[]>([]);
   const [isLiked, setIsLiked] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -35,6 +38,42 @@ export const useLikes = (photoId: string, currentUserId?: string, collectionName
 
     try {
       await interactionService.toggleLike(photoId, currentUserId, collectionName);
+
+      // Send notification for new likes (not for unlikes)
+      if (!previousIsLiked && post && post.authorId && post.authorId !== currentUserId) {
+        try {
+          const currentUser = await userService.getUserById(currentUserId);
+
+          // Create in-app notification
+          await notificationService.createNotification({
+            userId: post.authorId,
+            type: 'like',
+            actorId: currentUserId,
+            actorName: currentUser?.name || 'Someone',
+            actorAvatar: currentUser?.avatar,
+            message: 'liked your memory.',
+            photoId: photoId,
+            createdAt: Date.now(),
+            isRead: false
+          });
+
+          // Send email notification
+          const owner = await userService.getUserById(post.authorId);
+          if (owner?.email) {
+            await emailService.sendNotificationEmailBackground(
+              owner.email,
+              owner.name,
+              'like',
+              {
+                actorName: currentUser?.name || 'Someone',
+                photoUrl: window.location.href
+              }
+            );
+          }
+        } catch (err) {
+          console.warn('[useLikes] Failed to send notification:', err);
+        }
+      }
     } catch (error) {
       // Revert on error
       setLikes(previousLikes);
@@ -47,7 +86,7 @@ export const useLikes = (photoId: string, currentUserId?: string, collectionName
   return { likes, isLiked, toggleLike, isAnimating };
 };
 
-export const useComments = (photoId: string, collectionName: string = 'photos') => {
+export const useComments = (photoId: string, collectionName: string = 'photos', post?: any) => {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -71,6 +110,41 @@ export const useComments = (photoId: string, collectionName: string = 'photos') 
         userAvatar: user.avatar,
         text
       }, collectionName);
+
+      // Send notification to post owner
+      if (post && post.authorId && post.authorId !== user.id) {
+        try {
+          // Create in-app notification
+          await notificationService.createNotification({
+            userId: post.authorId,
+            type: 'comment',
+            actorId: user.id,
+            actorName: user.name,
+            actorAvatar: user.avatar,
+            message: `commented: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`,
+            photoId: photoId,
+            createdAt: Date.now(),
+            isRead: false
+          });
+
+          // Send email notification
+          const owner = await userService.getUserById(post.authorId);
+          if (owner?.email) {
+            await emailService.sendNotificationEmailBackground(
+              owner.email,
+              owner.name,
+              'comment',
+              {
+                actorName: user.name,
+                message: `"${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"}`,
+                photoUrl: window.location.href
+              }
+            );
+          }
+        } catch (err) {
+          console.warn('[useComments] Failed to send notification:', err);
+        }
+      }
     } catch (error) {
       console.error("Failed to add comment", error);
       throw error;

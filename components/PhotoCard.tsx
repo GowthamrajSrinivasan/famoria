@@ -8,6 +8,7 @@ import { storageService } from '../services/storageService';
 import { photoService } from '../services/photoService';
 import * as photoKeyModule from '../lib/crypto/photoKey';
 import * as photoCryptoModule from '../lib/crypto/photoCrypto';
+import { processInParallel } from '../lib/processInParallel';
 import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -70,54 +71,93 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
     // Decrypt photos
     const decryptPhotos = async () => {
       setIsDecrypting(true);
+      const overallStartTime = performance.now();
+
       try {
         if (post) {
-          // Multi-image post - decrypt all photos
-          console.log(`[PhotoCard] Decrypting post ${post.id} with ${post.photoIds.length} photos`);
-
-          const urls: string[] = [];
+          // Multi-image post - decrypt all photos in parallel
+          console.log(`[PhotoCard] 🔓 Starting decryption for post ${post.id} with ${post.photoIds.length} photos`);
 
           // Get all photos for this post from the album
+          const fetchStartTime = performance.now();
           const postPhotos = await photoService.getPostPhotos(photo.albumId!, post.id);
+          const fetchEndTime = performance.now();
+          console.log(`[PhotoCard] ⏱️ Photo metadata fetch took: ${(fetchEndTime - fetchStartTime).toFixed(2)}ms`);
 
-          for (let i = 0; i < postPhotos.length; i++) {
-            const photoData = postPhotos[i];
-            const photoId = photoData.id;
+          // Use parallel processing for decryption
+          const parallelStartTime = performance.now();
+          const urls = await processInParallel<typeof postPhotos[0], string | null>(
+            postPhotos,
+            async (photoData, index) => {
+              const photoId = photoData.id;
+              const photoStartTime = performance.now();
+              console.log(`[PhotoCard] 🔐 [${index + 1}/${postPhotos.length}] Starting: ${photoId}`);
 
-            console.log(`[PhotoCard] Decrypting photo ${i + 1}/${postPhotos.length}: ${photoId}`);
+              // Check cache first
+              const cacheCheckStart = performance.now();
+              let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
+              const cacheCheckEnd = performance.now();
 
-            // Check cache first
-            let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
+              if (imageBlob) {
+                const photoEndTime = performance.now();
+                console.log(`[PhotoCard] ✅ [${index + 1}/${postPhotos.length}] Cache HIT for ${photoId} | Total: ${(photoEndTime - photoStartTime).toFixed(2)}ms`);
+                return URL.createObjectURL(imageBlob);
+              }
 
-            if (imageBlob) {
-              console.log(`[PhotoCard] Cache hit for thumbnail ${photoId}`);
-              urls.push(URL.createObjectURL(imageBlob));
-            } else {
-              console.log(`[PhotoCard] Cache miss for ${photoId}, decrypting...`);
+              console.log(`[PhotoCard] ❌ [${index + 1}/${postPhotos.length}] Cache MISS for ${photoId} | Cache check: ${(cacheCheckEnd - cacheCheckStart).toFixed(2)}ms`);
 
               // Derive photo key
+              const keyStartTime = performance.now();
               const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
+              const keyEndTime = performance.now();
+              console.log(`[PhotoCard] 🔑 [${index + 1}/${postPhotos.length}] Key derivation: ${(keyEndTime - keyStartTime).toFixed(2)}ms`);
 
               const pathToLoad = photoData.thumbnailPath || photoData.encryptedPath;
 
               if (!pathToLoad) {
-                console.error(`[PhotoCard] No file path found for photo ${photoId}`);
-                continue;
+                console.error(`[PhotoCard] ⚠️ [${index + 1}/${postPhotos.length}] No file path found for photo ${photoId}`);
+                return null;
               }
 
-              // Download and decrypt
+              // Download
+              const downloadStartTime = performance.now();
               const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+              const downloadEndTime = performance.now();
+              console.log(`[PhotoCard] 📥 [${index + 1}/${postPhotos.length}] Download: ${(downloadEndTime - downloadStartTime).toFixed(2)}ms | Size: ${(encryptedBlob.size / 1024).toFixed(2)}KB`);
+
+              // Decrypt
+              const decryptStartTime = performance.now();
               imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+              const decryptEndTime = performance.now();
+              console.log(`[PhotoCard] 🔓 [${index + 1}/${postPhotos.length}] Decryption: ${(decryptEndTime - decryptStartTime).toFixed(2)}ms`);
+
               const decryptedUrl = URL.createObjectURL(imageBlob);
-              urls.push(decryptedUrl);
 
               // Cache the decrypted thumbnail
+              const cacheStartTime = performance.now();
               await cacheService.setCachedDecryptedPhoto(photoId, photo.albumId!, imageBlob, 'thumbnail');
-            }
-          }
+              const cacheEndTime = performance.now();
+              console.log(`[PhotoCard] 💾 [${index + 1}/${postPhotos.length}] Cache save: ${(cacheEndTime - cacheStartTime).toFixed(2)}ms`);
 
-          setDisplayUrls(urls);
-          console.log(`[PhotoCard] Post decrypted successfully: ${urls.length} images`);
+              const photoEndTime = performance.now();
+              const totalPhotoTime = photoEndTime - photoStartTime;
+              console.log(`[PhotoCard] ✅ [${index + 1}/${postPhotos.length}] COMPLETE: ${photoId} | Total: ${totalPhotoTime.toFixed(2)}ms`);
+
+              return decryptedUrl;
+            },
+            3 // Concurrency limit of 3
+          );
+
+          const parallelEndTime = performance.now();
+          console.log(`[PhotoCard] ⏱️ Parallel decryption took: ${(parallelEndTime - parallelStartTime).toFixed(2)}ms`);
+
+          // Filter out null results (failed decryptions)
+          const validUrls = urls.filter((url): url is string => url !== null);
+          setDisplayUrls(validUrls);
+
+          const overallEndTime = performance.now();
+          const totalTime = overallEndTime - overallStartTime;
+          console.log(`[PhotoCard] 🎉 Post decrypted successfully: ${validUrls.length}/${postPhotos.length} images | TOTAL TIME: ${totalTime.toFixed(2)}ms (${(totalTime / 1000).toFixed(2)}s)`);
         } else {
           // Single photo (legacy)
           const photoId = (photo as any).albumPhotoId || photo.id;
