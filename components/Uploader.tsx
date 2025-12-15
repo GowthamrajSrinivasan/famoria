@@ -15,6 +15,7 @@ import { db } from '../lib/firebase';
 import * as imageUtils from '../lib/imageUtils';
 import * as keyModule from '../lib/crypto/photoKey';
 import * as cryptoModule from '../lib/crypto/photoCrypto';
+import { processInParallel } from '../lib/parallelUtils';
 
 interface UploaderProps {
   onUploadComplete: (posts: Post[]) => void; // Changed to Post[] for parallel uploads
@@ -384,7 +385,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
 
     try {
       const albumId = selectedAlbumId;
-      console.log(`[Upload] Starting upload of ${filesToUpload.length} photos to album ${albumId} (single post with carousel)`);
+      console.log(`[Upload] Starting PARALLEL upload: ${filesToUpload.length} photos to album ${albumId}`);
 
       // 1. Create a single post shell first
       const postData: Omit<Post, 'id'> = {
@@ -405,66 +406,69 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       const createdPost = await photoService.createPost(postData);
       console.log(`[Upload] Created post shell: ${createdPost.id}`);
 
-      const encryptedPhotoRecords = [];
+      // 2. Process and upload all photos in PARALLEL (concurrency=5)
+      const photoRecords = await processInParallel(
+        filesToUpload,
+        async (file: File, index) => {
+          // Generate unique ID for this photo
+          const photoId = crypto.randomUUID();
+          const fileName = `${Date.now()}_${photoId}.enc`;
+          const storagePath = `albums/${albumId}/photos/${fileName}`;
+          const thumbnailPath = storageService.getThumbnailPath(storagePath);
 
-      // 2. Process and upload all photos for this single post
-      for (let i = 0; i < filesToUpload.length; i++) {
-        const file = filesToUpload[i];
-        setUploadProgress(`Processing ${i + 1}/${filesToUpload.length} photos...`);
+          console.log(`[Upload] Processing photo ${index + 1}/${filesToUpload.length}: ${photoId}`);
 
-        // Generate unique ID for this photo
-        const photoId = crypto.randomUUID();
-        const fileName = `${Date.now()}_${photoId}.enc`;
-        const storagePath = `albums/${albumId}/photos/${fileName}`;
-        const thumbnailPath = storageService.getThumbnailPath(storagePath);
+          // Generate Thumbnail
+          const thumbnail = await imageUtils.generateThumbnail(file, 400, 0.8);
 
-        console.log(`[Upload] Processing photo ${i + 1}/${filesToUpload.length}: ${photoId}`);
+          // Derive Key & Encrypt
+          const photoKey = await keyModule.derivePhotoKey(albumKey, photoId);
 
-        // Generate Thumbnail
-        const thumbnail = await imageUtils.generateThumbnail(file, 400, 0.8);
+          // Encrypt full image
+          const encryptedFile = await cryptoModule.encryptFile(file, photoKey);
 
-        // Derive Key & Encrypt
-        const photoKey = await keyModule.derivePhotoKey(albumKey, photoId);
+          // Encrypt thumbnail
+          const thumbnailFile = new File([thumbnail], 'thumbnail.webp', { type: 'image/webp' });
+          const encryptedThumbnail = await cryptoModule.encryptFile(thumbnailFile, photoKey);
 
-        // Encrypt full image
-        const encryptedFile = await cryptoModule.encryptFile(file, photoKey);
+          // Encrypt Metadata
+          const metadata = {
+            caption: analysis.caption,
+            tags: analysis.tags,
+            date: new Date().toISOString(),
+            author: user.name,
+            authorId: user.id
+          };
+          const encMeta = await cryptoModule.encryptMetadata(metadata, photoKey);
 
-        // Encrypt thumbnail
-        const thumbnailFile = new File([thumbnail], 'thumbnail.webp', { type: 'image/webp' });
-        const encryptedThumbnail = await cryptoModule.encryptFile(thumbnailFile, photoKey);
+          // Upload encrypted files
+          await storageService.uploadWithCaching(encryptedFile, storagePath);
+          await storageService.uploadWithCaching(encryptedThumbnail, thumbnailPath);
 
-        // Encrypt Metadata
-        const metadata = {
-          caption: analysis.caption,
-          tags: analysis.tags,
-          date: new Date().toISOString(),
-          author: user.name,
-          authorId: user.id
-        };
-        const encMeta = await cryptoModule.encryptMetadata(metadata, photoKey);
+          console.log(`[Upload] Photo ${index + 1}/${filesToUpload.length} uploaded: ${photoId}`);
 
-        // Upload encrypted files
-        setUploadProgress(`Uploading ${i + 1}/${filesToUpload.length}...`);
-        await storageService.uploadWithCaching(encryptedFile, storagePath);
-        await storageService.uploadWithCaching(encryptedThumbnail, thumbnailPath);
+          return {
+            id: photoId,
+            albumId: albumId,
+            version: 1,
+            createdAt: Date.now(),
+            encryptedPath: storagePath,
+            thumbnailPath: thumbnailPath,
+            encryptedMetadata: encMeta.encrypted,
+            metadataIv: encMeta.iv,
+            metadataAuthTag: encMeta.authTag,
+            photoIv: encMeta.photoIv || "",
+            authorId: user.id
+          };
+        },
+        5, // Process 5 images concurrently (increased from 3!)
+        (completed, total) => {
+          setUploadProgress(`${completed}/${total} photos processed...`);
+        }
+      );
 
-        const encryptedPhotoRecord = {
-          id: photoId,
-          albumId: albumId,
-          version: 1,
-          createdAt: Date.now(),
-          encryptedPath: storagePath,
-          thumbnailPath: thumbnailPath,
-          encryptedMetadata: encMeta.encrypted,
-          metadataIv: encMeta.iv,
-          metadataAuthTag: encMeta.authTag,
-          photoIv: encMeta.photoIv || "",
-          authorId: user.id
-        };
-
-        encryptedPhotoRecords.push(encryptedPhotoRecord);
-        console.log(`[Upload] Photo ${i + 1}/${filesToUpload.length} uploaded: ${photoId}`);
-      }
+      // Filter out failed uploads
+      const encryptedPhotoRecords = photoRecords.filter(r => r !== null);
 
       // 3. Save ALL photos to album subcollection with the post ID
       console.log(`[Upload] Saving ${encryptedPhotoRecords.length} photos to album subcollection...`);

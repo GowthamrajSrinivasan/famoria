@@ -70,29 +70,27 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
       setIsDecrypting(true);
       try {
         if (post) {
-          // Multi-image post - decrypt all photos
-          console.log(`[PhotoCard] Decrypting post ${post.id} with ${post.photoIds.length} photos`);
-
-          const urls: string[] = [];
+          // Multi-image post - decrypt all photos IN PARALLEL
+          console.log(`[PhotoCard] Decrypting ${post.photoIds.length} photos for post ${post.id} IN PARALLEL`);
 
           // Get all photos for this post from the album
           const postPhotos = await photoService.getPostPhotos(photo.albumId!, post.id);
 
-          for (let i = 0; i < postPhotos.length; i++) {
-            const photoData = postPhotos[i];
+          // Decrypt all photos in parallel
+          const urlPromises = postPhotos.map(async (photoData, idx) => {
             const photoId = photoData.id;
-
-            console.log(`[PhotoCard] Decrypting photo ${i + 1}/${postPhotos.length}: ${photoId}`);
 
             // Check cache first
             let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
 
             if (imageBlob) {
-              console.log(`[PhotoCard] Cache hit for thumbnail ${photoId}`);
-              urls.push(URL.createObjectURL(imageBlob));
-            } else {
-              console.log(`[PhotoCard] Cache miss for ${photoId}, decrypting...`);
+              console.log(`[PhotoCard] Cache hit for ${photoId.substring(0, 8)}...`);
+              return URL.createObjectURL(imageBlob);
+            }
 
+            console.log(`[PhotoCard] Decrypting photo ${idx + 1}/${postPhotos.length}`);
+
+            try {
               // Derive photo key
               const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
 
@@ -100,22 +98,30 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
               if (!pathToLoad) {
                 console.error(`[PhotoCard] No file path found for photo ${photoId}`);
-                continue;
+                return null;
               }
 
               // Download and decrypt
               const encryptedBlob = await storageService.downloadBlob(pathToLoad);
               imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
               const decryptedUrl = URL.createObjectURL(imageBlob);
-              urls.push(decryptedUrl);
 
-              // Cache the decrypted thumbnail
-              await cacheService.setCachedDecryptedPhoto(photoId, photo.albumId!, imageBlob, 'thumbnail');
+              // Cache the decrypted thumbnail (non-blocking)
+              cacheService.setCachedDecryptedPhoto(photoId, photo.albumId!, imageBlob, 'thumbnail');
+
+              return decryptedUrl;
+            } catch (error) {
+              console.error(`[PhotoCard] Failed to decrypt photo ${photoId}:`, error);
+              return null;
             }
-          }
+          });
+
+          // Wait for all decryptions with error handling
+          const results = await Promise.all(urlPromises);
+          const urls = results.filter((url): url is string => url !== null);
 
           setDisplayUrls(urls);
-          console.log(`[PhotoCard] Post decrypted successfully: ${urls.length} images`);
+          console.log(`[PhotoCard] Parallel decryption complete: ${urls.length}/${postPhotos.length} images`);
         } else {
           // Single photo (legacy)
           const photoId = (photo as any).albumPhotoId || photo.id;
