@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MoreVertical, Trash2, Edit, Image as ImageIcon, Calendar } from 'lucide-react';
+import { MoreVertical, Trash2, Edit, Image as ImageIcon, Calendar, Film } from 'lucide-react';
 import { Album } from '../types';
 
 interface AlbumCardProps {
@@ -42,7 +42,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
 
     return (
         <div
-            className="group relative bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer border border-stone-100"
+            className="group relative bg-white rounded-2xl overflow-visible shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer border border-stone-100"
             onClick={onClick}
         >
             {/* Cover Photo */}
@@ -59,10 +59,18 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                     </div>
                 )}
 
-                {/* Post Count Badge */}
-                <div className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-sm text-white px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1.5">
-                    <ImageIcon size={14} />
-                    <span>{album.photoCount || 0} {(album.photoCount || 0) === 1 ? 'post' : 'posts'}</span>
+                {/* Content Count Badges */}
+                <div className="absolute bottom-3 right-3 flex gap-2">
+                    {/* Photos Count - Always show */}
+                    <div className="bg-black/60 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1">
+                        <ImageIcon size={12} />
+                        <span>{album.photoCount || 0}</span>
+                    </div>
+                    {/* Videos Count - Always show */}
+                    <div className="bg-black/60 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1">
+                        <Film size={12} />
+                        <span>{album.videoCount || 0}</span>
+                    </div>
                 </div>
 
                 {/* Last Updated Badge */}
@@ -101,7 +109,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                                 <>
                                     {/* Backdrop */}
                                     <div
-                                        className="fixed inset-0 z-10"
+                                        className="fixed inset-0 z-40"
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             setShowMenu(false);
@@ -109,7 +117,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                                     />
 
                                     {/* Menu */}
-                                    <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-stone-100 py-1 min-w-[140px] z-20 animate-fade-in-up">
+                                    <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-2xl border border-stone-200 py-2 w-48 z-50 max-h-[300px] overflow-y-auto">
                                         {onEdit && (
                                             <button
                                                 onClick={(e) => {
@@ -117,11 +125,14 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                                                     setShowMenu(false);
                                                     onEdit();
                                                 }}
-                                                className="w-full px-4 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 flex items-center gap-2"
+                                                className="w-full px-4 py-3 text-left text-sm text-stone-700 hover:bg-stone-50 flex items-center gap-3 transition-colors"
                                             >
-                                                <Edit size={14} />
-                                                <span>Edit Album</span>
+                                                <Edit size={16} />
+                                                <span className="font-medium">Edit Album</span>
                                             </button>
+                                        )}
+                                        {onEdit && onDelete && (
+                                            <div className="h-px bg-stone-200 mx-2 my-1" />
                                         )}
                                         {onDelete && (
                                             <button
@@ -130,10 +141,10 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                                                     setShowMenu(false);
                                                     onDelete();
                                                 }}
-                                                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                                className="w-full px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
                                             >
-                                                <Trash2 size={14} />
-                                                <span>Delete Album</span>
+                                                <Trash2 size={16} />
+                                                <span className="font-medium">Delete Album</span>
                                             </button>
                                         )}
                                     </div>

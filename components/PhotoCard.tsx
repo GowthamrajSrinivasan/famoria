@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Post, Photo, User } from '../types';
-import { MessageCircle, Calendar, Lock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MessageCircle, Calendar, Lock, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { LikeButton } from './LikeButton';
 import { useAuth } from '../context/AuthContext';
 import { cacheService } from '../services/cacheService';
@@ -15,6 +15,7 @@ interface PhotoCardProps {
   photo: Post | Photo; // Accept both for backward compatibility
   onClick: (photo: Photo | Post) => void;
   currentUser: User | null;
+  onDelete?: (photo: Post | Photo) => void; // Add delete handler
 }
 
 // Type guard to check if it's a Post
@@ -22,15 +23,16 @@ function isPost(item: Post | Photo): item is Post {
   return 'photoIds' in item && Array.isArray((item as Post).photoIds);
 }
 
-export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUser }) => {
+export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUser, onDelete }) => {
   const { getAlbumKey } = useAuth();
 
-  // Carousel state (only for multi-image posts)
+  // State
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [displayUrls, setDisplayUrls] = useState<string[]>([]);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [albumName, setAlbumName] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const post = isPost(photo) ? photo : null;
   const photoCount = post ? post.photoIds.length : 1;
@@ -174,8 +176,13 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
         if (albumSnap.exists()) {
           setAlbumName(albumSnap.data().name);
         }
-      } catch (error) {
-        console.error('[PhotoCard] Failed to fetch album name:', error);
+      } catch (error: any) {
+        // Silently handle permission errors - user may not have access to album details
+        if (error?.code !== 'permission-denied' && !error?.message?.includes('permissions')) {
+          console.error('[PhotoCard] Failed to fetch album name:', error);
+        }
+        // Just don't show album name if we can't fetch it
+        setAlbumName(null);
       }
     };
 
@@ -191,6 +198,28 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
     e.stopPropagation();
     setCurrentImageIndex((prev) => (prev === photoCount - 1 ? 0 : prev + 1));
   };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (!onDelete) return;
+
+    if (!confirm('Are you sure you want to delete this photo? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setIsDeleting(true);
+      await onDelete(photo);
+    } catch (error) {
+      console.error('Failed to delete photo:', error);
+      alert('Failed to delete photo. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const isOwner = currentUser?.id === photo.author || currentUser?.id === photo.uploadedBy;
 
   return (
     <div
@@ -209,6 +238,22 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
           </div>
         ) : displayUrls.length > 0 ? (
           <>
+            {/* Delete Button - Top Right Corner */}
+            {isOwner && onDelete && (
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="absolute top-3 right-3 z-20 bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 transform hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Delete photo"
+              >
+                {isDeleting ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Trash2 size={20} />
+                )}
+              </button>
+            )}
+
             <img
               src={displayUrls[currentImageIndex]}
               alt={photo.caption}
@@ -265,7 +310,11 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
         {!isDecrypting && !isLocked && displayUrls.length > 0 && (
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-end justify-between p-5">
             <div className="flex gap-3">
-              <LikeButton photoId={photo.id} currentUserId={currentUser?.id} />
+              <LikeButton
+                photoId={photo.id}
+                currentUserId={currentUser?.id}
+                itemType={post ? 'post' : 'photo'}
+              />
               <button
                 className="bg-white/20 hover:bg-white/40 backdrop-blur-sm p-2 rounded-full text-white transition-all transform hover:scale-110"
                 onClick={(e) => {
