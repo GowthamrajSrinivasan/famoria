@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2, Loader2, ChevronLeft, ChevronRight, Edit2, MessageCircle } from 'lucide-react';
 import { Photo, Post, User } from '../types';
 import { CommentSection } from './CommentSection';
 import { LikeButton } from './LikeButton';
+import { LikesPreview } from './LikesPreview';
+import { LikesModal } from './LikesModal';
 import { EditPhotoModal } from './EditPhotoModal';
 import { photoService } from '../services/photoService';
 import { cacheService } from '../services/cacheService';
@@ -32,6 +34,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showLikesModal, setShowLikesModal] = useState(false);
 
   // Carousel state for posts
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -225,7 +228,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
         <X size={24} />
       </button>
 
-      <div className="w-full max-w-6xl h-full max-h-[90vh] bg-white rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row">
+      <div className="w-full max-w-7xl h-full max-h-[90vh] bg-white rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row">
 
         {/* Image Section */}
         <div className="flex-1 bg-black flex items-center justify-center relative group">
@@ -243,7 +246,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
               <img
                 src={displayUrls[currentImageIndex]}
                 alt={photo.caption}
-                className="max-w-full max-h-[50vh] md:max-h-full object-contain"
+                className="w-full h-full object-contain"
               />
 
               {/* Multi-image controls */}
@@ -288,132 +291,168 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
         </div>
 
         {/* Sidebar Section */}
-        <div className="w-full md:w-[400px] lg:w-[450px] flex flex-col bg-white border-l border-stone-100">
+        <div className="w-full md:w-[480px] lg:w-[520px] flex flex-col bg-white border-l border-stone-100">
 
-          {/* Header */}
-          <div className="p-6 border-b border-stone-100">
-            <div className="flex items-center justify-between mb-4">
+          {/* Right Sidebar - Info + Comments */}
+          <div className="w-full h-full flex flex-col bg-white">
+            {/* Top Section - Photo info and actions (fixed height) */}
+            <div className="flex-shrink-0 p-6 space-y-5 border-b border-stone-100">
+              {/* Author & Date */}
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold text-sm">
-                  {(photo.author || "?").charAt(0)}
+                <img
+                  src={photo.authorAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(photo.author)}&background=f97316&color=fff`}
+                  alt={photo.author}
+                  className="w-10 h-10 rounded-full object-cover"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-stone-800 truncate">{photo.author}</p>
+                  <p className="text-xs text-stone-400">
+                    {new Date(photo.date).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric'
+                    })}
+                  </p>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-stone-800">{photo.author || "Unknown"}</h3>
-                  <div className="flex items-center gap-1.5 text-xs text-stone-400">
-                    <Calendar size={12} />
-                    <span>{photo.date}</span>
+
+                {/* More Options Menu */}
+                {currentUser?.id === photo.authorId && (
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowMenu(!showMenu)}
+                      className="p-2 hover:bg-stone-100 rounded-lg transition-colors"
+                    >
+                      <MoreVertical size={18} className="text-stone-400" />
+                    </button>
+
+                    {showMenu && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setShowMenu(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-xl border border-stone-100 py-1 z-20 min-w-[160px]">
+                          <button
+                            onClick={() => {
+                              setShowEditModal(true);
+                              setShowMenu(false);
+                            }}
+                            className="w-full px-4 py-2 text-left text-sm text-stone-700 hover:bg-stone-50 flex items-center gap-2"
+                          >
+                            <Edit2 size={16} />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowDeleteConfirm(true);
+                              setShowMenu(false);
+                            }}
+                            className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                          >
+                            <Trash2 size={16} />
+                            Delete
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
+                )}
               </div>
 
-              {/* More Menu - Only for owner */}
-              {currentUser?.id === photo.authorId && (
-                <div className="relative">
-                  <button
-                    onClick={() => setShowMenu(!showMenu)}
-                    className="text-stone-400 hover:bg-stone-50 p-2 rounded-full transition-colors"
-                  >
-                    <MoreVertical size={20} />
-                  </button>
+              {/* Caption */}
+              <p className="text-stone-700 text-sm leading-relaxed">{photo.caption}</p>
 
-                  {showMenu && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setShowMenu(false)}
-                      />
-                      <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-xl border border-stone-100 py-1 min-w-[140px] z-20 animate-fade-in-up">
-                        <button
-                          onClick={() => {
-                            setShowMenu(false);
-                            setShowDeleteConfirm(true);
-                          }}
-                          className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                        >
-                          <Trash2 size={14} />
-                          <span>{post ? 'Delete Post' : 'Delete Photo'}</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
+              {/* Tags */}
+              {photo.tags && photo.tags.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {photo.tags.map((tag, index) => (
+                    <span
+                      key={index}
+                      className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-md"
+                    >
+                      #{tag}
+                    </span>
+                  ))}
                 </div>
               )}
-            </div>
 
-            <p className="text-stone-700 leading-relaxed text-[15px]">{photo.caption}</p>
-
-            <div className="flex flex-wrap gap-2 mt-4">
-              {(photo.tags || []).map((tag, i) => (
-                <span key={i} className="text-xs font-medium text-stone-500 bg-stone-100 px-2 py-1 rounded-md">
-                  #{tag}
-                </span>
-              ))}
-              {(photo as any).isAiGenerated && (
-                <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded-md border border-purple-100 flex items-center gap-1">
-                  <Sparkles size={10} /> AI Edited
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between mt-6 pt-4 border-t border-stone-50">
-              <div className="flex gap-4">
-                <LikeButton photoId={photo.id} currentUserId={currentUser?.id} variant="lightbox" />
-                <button className="flex items-center gap-2 px-4 py-2 rounded-full border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors">
-                  <Share2 size={18} />
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <LikeButton
+                  photoId={photo.id}
+                  currentUserId={currentUser?.id}
+                  itemType={post ? 'post' : 'photo'}
+                  variant="lightbox"
+                  showCount={true}
+                />
+                <button className="p-2.5 hover:bg-stone-100 text-stone-600 rounded-lg transition-colors">
+                  <Share2 size={20} />
                 </button>
               </div>
 
-              {/* Edit Button - only for single photos */}
-              {!post && (
+              {/* Reactions Section - Compact */}
+              {photo.likes && photo.likes.length > 0 && (
+                <div className="pt-3 border-t border-stone-100">
+                  <LikesPreview
+                    photoId={photo.id}
+                    likes={photo.likes}
+                    onClick={() => setShowLikesModal(true)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Comments - Takes remaining space */}
+            <div className="flex-1 overflow-hidden relative bg-stone-50/30 min-h-0">
+              <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-white to-transparent z-10 pointer-events-none" />
+              <CommentSection
+                photoId={photo.id}
+                itemType={post ? 'post' : 'photo'}
+                currentUser={currentUser}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Delete Confirmation Modal */}
+        {showDeleteConfirm && (
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-10 rounded-3xl">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-fade-in-up">
+              <h3 className="text-xl font-bold text-stone-800 mb-2">{post ? 'Delete Post?' : 'Delete Photo?'}</h3>
+              <p className="text-stone-600 mb-6">
+                {post
+                  ? `This will permanently delete this post and all ${photoCount} photos from your album and the family feed.`
+                  : 'This will permanently delete this photo from your album and the family feed.'
+                } This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
                 <button
-                  onClick={() => setShowEditModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-full bg-stone-900 text-white shadow-md hover:bg-stone-700 hover:shadow-lg transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={isDeleting}
+                  className="flex-1 px-4 py-3 bg-stone-100 text-stone-700 rounded-xl hover:bg-stone-200 transition-colors font-medium disabled:opacity-50"
                 >
-                  <Sparkles size={16} className="text-orange-300" />
-                  <span className="text-sm font-medium">Edit with AI</span>
+                  Cancel
                 </button>
-              )}
+                <button
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium disabled:opacity-50"
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Comments */}
-          <div className="flex-1 overflow-hidden relative bg-stone-50/30">
-            <div className="absolute top-0 left-0 right-0 h-4 bg-gradient-to-b from-white to-transparent z-10 pointer-events-none" />
-            <CommentSection photoId={photo.id} currentUser={currentUser} />
-          </div>
-        </div>
+        {/* Likes Modal */}
+        {showLikesModal && (
+          <LikesModal
+            likes={photo.likes || []}
+            onClose={() => setShowLikesModal(false)}
+          />
+        )}
       </div>
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && (
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-10 rounded-3xl">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl animate-fade-in-up">
-            <h3 className="text-xl font-bold text-stone-800 mb-2">{post ? 'Delete Post?' : 'Delete Photo?'}</h3>
-            <p className="text-stone-600 mb-6">
-              {post
-                ? `This will permanently delete this post and all ${photoCount} photos from your album and the family feed.`
-                : 'This will permanently delete this photo from your album and the family feed.'
-              } This action cannot be undone.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                disabled={isDeleting}
-                className="flex-1 px-4 py-3 bg-stone-100 text-stone-700 rounded-xl hover:bg-stone-200 transition-colors font-medium disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={isDeleting}
-                className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium disabled:opacity-50"
-              >
-                {isDeleting ? 'Deleting...' : 'Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

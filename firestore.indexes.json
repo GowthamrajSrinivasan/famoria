@@ -1,11 +1,43 @@
 {
     "indexes": [
         {
+            "collectionGroup": "photos",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "albumId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "photos",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "albumId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "postId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "orderInPost",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
             "collectionGroup": "posts",
             "queryScope": "COLLECTION",
             "fields": [
                 {
-                    "fieldPath": "authorId",
+                    "fieldPath": "albumId",
                     "order": "ASCENDING"
                 },
                 {
@@ -16,6 +48,34 @@
         },
         {
             "collectionGroup": "albums",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "members",
+                    "arrayConfig": "CONTAINS"
+                },
+                {
+                    "fieldPath": "updatedAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "videos",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "albumId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "groups",
             "queryScope": "COLLECTION",
             "fields": [
                 {

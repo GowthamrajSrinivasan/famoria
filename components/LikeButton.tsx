@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Heart } from 'lucide-react';
 import { useLikes } from '../hooks/useInteractions';
+import { LikesModal } from './LikesModal';
+import { LikesPreview } from './LikesPreview';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
@@ -9,17 +11,22 @@ interface LikeButtonProps {
   currentUserId?: string;
   showCount?: boolean;
   variant?: 'card' | 'lightbox';
+  itemType?: 'photo' | 'video' | 'post'; // Added 'post' type
 }
 
 export const LikeButton: React.FC<LikeButtonProps> = ({
   photoId,
   currentUserId,
   showCount = true,
-  variant = 'card'
+  variant = 'card',
+  itemType = 'photo'
 }) => {
-  const { likes, isLiked, toggleLike, isAnimating } = useLikes(photoId, currentUserId);
+  // Map itemType to Firestore collection name
+  const collectionName = itemType === 'video' ? 'videos' : itemType === 'post' ? 'posts' : 'photos';
+  const { likes, isLiked, toggleLike, isAnimating } = useLikes(photoId, currentUserId, collectionName);
   const [showTooltip, setShowTooltip] = useState(false);
   const [likerNames, setLikerNames] = useState<string[]>([]);
+  const [showLikesModal, setShowLikesModal] = useState(false);
 
   // Fetch user names for the likers
   useEffect(() => {
@@ -52,9 +59,9 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
   const baseClasses = "flex items-center gap-2 transition-all active:scale-95";
   const styles = {
     card: "bg-white/20 hover:bg-white/40 backdrop-blur-sm p-2 rounded-full text-white",
-    lightbox: `px-4 py-2 rounded-full border transition-colors ${isLiked
-      ? 'bg-red-50 border-red-100 text-red-500'
-      : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+    lightbox: `px-5 py-2.5 rounded-full transition-colors ${isLiked
+      ? 'bg-red-50 hover:bg-red-100'
+      : 'bg-stone-100 hover:bg-stone-200'
       }`
   };
 
@@ -84,41 +91,53 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
   };
 
   return (
-    <div className="relative inline-block">
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          toggleLike();
-        }}
-        onMouseEnter={() => likes.length > 0 && setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-        className={`${baseClasses} ${styles[variant]} ${isAnimating ? 'animate-heart-burst' : ''}`}
-      >
-        <Heart
-          size={variant === 'lightbox' ? 20 : 18}
-          fill={isLiked ? "currentColor" : "none"}
-          className={`transition-all duration-200 ${isLiked
-            ? "text-red-500 scale-110"
-            : (variant === 'card' ? "text-white/90" : "text-stone-400")
-            }`}
-        />
-        {showCount && likes.length > 0 && (
-          <span className={`text-sm font-semibold ${variant === 'card' ? 'text-white' : ''}`}>
-            {likes.length}
-          </span>
-        )}
-      </button>
+    <>
+      <div className="relative inline-flex items-center gap-3">
+        {/* Like Button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleLike();
+          }}
+          onMouseEnter={() => likes.length > 0 && setShowTooltip(true)}
+          onMouseLeave={() => setShowTooltip(false)}
+          className={`${baseClasses} ${styles[variant]} ${isAnimating ? 'animate-heart-burst' : ''}`}
+        >
+          <Heart
+            size={variant === 'lightbox' ? 20 : 18}
+            fill={isLiked ? "currentColor" : "none"}
+            className={`transition-all duration-200 ${variant === 'lightbox'
+                ? (isLiked ? "text-red-500" : "text-stone-500")
+                : (isLiked ? "text-red-500 scale-110" : "text-white/90")
+              }`}
+          />
+          {showCount && likes.length > 0 && (
+            <span className={`text-sm font-semibold ${variant === 'card' ? 'text-white' : (isLiked ? 'text-red-500' : 'text-stone-600')
+              }`}>
+              {likes.length}
+            </span>
+          )}
+        </button>
 
-      {/* Who Liked Tooltip */}
-      {showTooltip && likes.length > 0 && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-stone-900 text-white text-xs rounded-lg whitespace-nowrap z-50 animate-fade-in-up pointer-events-none">
-          <div className="max-w-xs">
-            <span>{getTooltipText()}</span>
+        {/* Who Liked Tooltip */}
+        {showTooltip && likes.length > 0 && (
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-stone-900 text-white text-xs rounded-lg whitespace-nowrap z-50 animate-fade-in-up pointer-events-none">
+            <div className="max-w-xs">
+              <span>{getTooltipText()}</span>
+            </div>
+            {/* Arrow */}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-stone-900 rotate-45" />
           </div>
-          {/* Arrow */}
-          <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-stone-900 rotate-45" />
-        </div>
+        )}
+      </div>
+
+      {/* Likes Modal */}
+      {showLikesModal && (
+        <LikesModal
+          likes={likes}
+          onClose={() => setShowLikesModal(false)}
+        />
       )}
-    </div>
+    </>
   );
 };

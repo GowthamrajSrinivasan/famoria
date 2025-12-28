@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Image as ImageIcon, Lock, Users, Globe, Key, AlertTriangle, Download, Check, Loader2, Upload } from 'lucide-react';
-import { Album } from '../types';
+import { Album, Group, User } from '../types';
 import { createAlbum, updateAlbum } from '../services/albumService';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
@@ -8,8 +8,10 @@ import { generateAndStoreDeviceKey, wrapMasterKeyForDevice } from '../lib/crypto
 import { uploadDriveAppDataFile } from '../services/driveService';
 import * as imageUtils from '../lib/imageUtils';
 import { db, storage } from '../lib/firebase';
-import { doc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getAllGroups } from '../services/groupService';
+import { userService } from '../services/userService';
 
 interface CreateAlbumModalProps {
     isOpen: boolean;
@@ -38,11 +40,45 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
     const [coverFile, setCoverFile] = useState<File | null>(null);
     const [coverPreview, setCoverPreview] = useState<string | null>(null);
 
+    // Access Permission State
+    const [accessTab, setAccessTab] = useState<'groups' | 'members'>('groups');
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
+    const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
+    const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+
     // Crypto State
     const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
     const [hasDownloaded, setHasDownloaded] = useState(false);
+
+    // Fetch groups and users
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                const [groupsData, usersData] = await Promise.all([
+                    getAllGroups(),
+                    userService.getAllUsers()
+                ]);
+                console.log('[CreateAlbumModal] Fetched groups:', groupsData);
+                console.log('[CreateAlbumModal] Fetched users:', usersData);
+                setGroups(groupsData);
+                setUsers(usersData.filter(u => u.id !== currentUserId));
+            } catch (err: any) {
+                // Always log the error to help debug
+                console.error('[CreateAlbumModal] Failed to fetch groups/users:', err);
+                console.error('[CreateAlbumModal] Error code:', err?.code);
+                console.error('[CreateAlbumModal] Error message:', err?.message);
+                // Set empty arrays if fetch fails
+                setGroups([]);
+                setUsers([]);
+            }
+        };
+        if (isOpen) {
+            fetchData();
+        }
+    }, [isOpen, currentUserId]);
 
     useEffect(() => {
         if (editAlbum) {
@@ -51,6 +87,28 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
             setPrivacy(editAlbum.privacy);
             setCoverPreview(editAlbum.coverPhoto || null);
             setCoverFile(null);
+
+            // Set access permissions - support both selectedGroups (new) and groups (old) for backward compatibility
+            const groupIds = editAlbum.selectedGroups || (editAlbum as any).groups || [];
+            const memberIds = editAlbum.members?.filter((id: string) => id !== currentUserId) || [];
+
+            console.log('[CreateAlbumModal] ====== EDITING ALBUM ======');
+            console.log('[CreateAlbumModal] Album ID:', editAlbum.id);
+            console.log('[CreateAlbumModal] Album selectedGroups from DB:', editAlbum.selectedGroups);
+            console.log('[CreateAlbumModal] Album groups (legacy) from DB:', (editAlbum as any).groups);
+            console.log('[CreateAlbumModal] Final groupIds to set:', groupIds);
+            console.log('[CreateAlbumModal] Setting selectedGroups to:', groupIds);
+            console.log('[CreateAlbumModal] Album members from DB:', editAlbum.members);
+            console.log('[CreateAlbumModal] Setting selectedMembers to:', memberIds);
+
+            setSelectedGroups(groupIds);
+            setSelectedMembers(memberIds);
+
+            // Verify state was set (async might need next tick)
+            setTimeout(() => {
+                console.log('[CreateAlbumModal] VERIFY - selectedGroups state:', groupIds);
+                console.log('[CreateAlbumModal] VERIFY - selectedMembers state:', memberIds);
+            }, 100);
         } else {
             setName('');
             setDescription('');
@@ -60,9 +118,12 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
             setStep('DETAILS');
             setCoverFile(null);
             setCoverPreview(null);
+            setSelectedGroups([]);
+            setSelectedMembers([]);
+            console.log('[CreateAlbumModal] ====== CREATING NEW ALBUM ======');
         }
         setError('');
-    }, [editAlbum, isOpen]);
+    }, [editAlbum, isOpen, currentUserId]);
 
     const handleDetailsSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -154,11 +215,21 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
 
                 await updateAlbum(editAlbum.id, updates);
 
-                // Also update coverPhoto in Firestore directly if needed
+                // Update groups and members directly in Firestore
+                const albumRef = doc(db, 'albums', editAlbum.id);
+                const firestoreUpdates: any = {};
+
+                // Add cover photo if changed
                 if (coverFile && coverPhotoURL) {
-                    const albumRef = doc(db, 'albums', editAlbum.id);
-                    await updateDoc(albumRef, { coverPhoto: coverPhotoURL });
+                    firestoreUpdates.coverPhoto = coverPhotoURL;
                 }
+
+                // Always update selectedGroups and members
+                firestoreUpdates.selectedGroups = selectedGroups;
+                firestoreUpdates.members = [currentUserId, ...selectedMembers];
+
+                console.log('[CreateAlbumModal] Updating album with:', firestoreUpdates);
+                await updateDoc(albumRef, firestoreUpdates);
 
                 onSuccess(editAlbum.id);
                 onClose();
@@ -167,8 +238,18 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                 // 1. Ensure Drive Token
                 let token = googleAccessToken;
                 if (!token) {
-                    token = await refreshDriveToken();
-                    if (!token) throw new Error("Google Drive access required for secure storage.");
+                    try {
+                        token = await refreshDriveToken();
+                        if (!token) {
+                            throw new Error("Please sign in to Google Drive first. Go to Settings to connect your account.");
+                        }
+                    } catch (err: any) {
+                        // Handle popup blocker
+                        if (err?.message?.includes('popup-blocked') || err?.code === 'auth/popup-blocked') {
+                            throw new Error("Popup blocked! Please allow popups for this site, or go to Settings to manually sign in to Google Drive.");
+                        }
+                        throw new Error("Please sign in to Google Drive first. Go to Settings to connect your account.");
+                    }
                 }
 
                 // 2. Generate Master Key (Raw Bytes) - 32 bytes CSPRNG
@@ -205,8 +286,13 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                 // 6. Upload to Drive (single file, dual protection)
                 const filename = `famoria_album_${masterKeyId}.key`;
                 await uploadDriveAppDataFile(filename, JSON.stringify(driveBlob), token!);
-                // 7. Create Album in Firestore
+
+                // 7. Create Album in Firestore with groups and members
                 const albumId = masterKeyId;
+
+                // Combine creator + selected members
+                const allMembers = [currentUserId, ...selectedMembers];
+
                 await setDoc(doc(db, 'albums', albumId), {
                     id: albumId,
                     name: name.trim(),
@@ -214,12 +300,15 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     privacy,
                     createdBy: currentUserId,
                     userId: currentUserId,
-                    members: [currentUserId],
+                    members: allMembers,
+                    accessType: 'groups',
+                    selectedGroups: selectedGroups, // Store selected groups with correct field name
                     masterKeyId: masterKeyId,
                     createdAt: serverTimestamp(),
                     updatedAt: serverTimestamp(),
                     coverPhoto: coverPhotoURL,
-                    photoCount: 0
+                    photoCount: 0,
+                    videoCount: 0
                 });
 
                 // 8. Unlock locally (Add to Keyring)
@@ -269,9 +358,9 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl animate-fade-in-up overflow-hidden">
+            <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] shadow-2xl animate-fade-in-up overflow-hidden flex flex-col">
                 {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-stone-100 bg-stone-50">
+                <div className="flex items-center justify-between p-6 border-b border-stone-100 bg-stone-50 flex-shrink-0">
                     <h2 className="text-xl font-bold text-stone-800 flex items-center gap-2">
                         {step === 'DETAILS' ? (editAlbum ? 'Edit Album' : 'Create New Album') :
                             step === 'PROCESSING' ? 'Securing Vault...' : 'Emergency Backup'}
@@ -283,7 +372,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     )}
                 </div>
 
-                <div className="p-6">
+                <div className="p-6 overflow-y-auto flex-1">
                     {/* STEP 1: Details */}
                     {step === 'DETAILS' && (
                         <form onSubmit={handleDetailsSubmit} className="space-y-5">
@@ -337,27 +426,137 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                     </label>
                                 </div>
                             </div>
+
+                            {/* Access Permission Section */}
                             <div>
-                                <label className="block text-sm font-semibold text-stone-700 mb-2">Privacy</label>
-                                <div className="grid grid-cols-3 gap-3">
-                                    {[
-                                        { value: 'private', label: 'Private', icon: Lock },
-                                        { value: 'family', label: 'Family', icon: Users },
-                                        { value: 'public', label: 'Public', icon: Globe }
-                                    ].map((opt) => (
-                                        <button
-                                            key={opt.value}
-                                            type="button"
-                                            onClick={() => setPrivacy(opt.value as any)}
-                                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${privacy === opt.value ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-stone-100 hover:border-stone-200 text-stone-600'
-                                                }`}
-                                        >
-                                            <opt.icon size={20} className="mb-1" />
-                                            <span className="text-xs font-semibold">{opt.label}</span>
-                                        </button>
-                                    ))}
+                                <label className="block text-sm font-semibold text-stone-700 mb-3">Access Permission</label>
+
+                                {/* Groups/Members Tabs */}
+                                <div className="flex gap-2 mb-4 bg-stone-100 p-1 rounded-lg">
+                                    <button
+                                        type="button"
+                                        onClick={() => setAccessTab('groups')}
+                                        className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${accessTab === 'groups'
+                                            ? 'bg-white text-stone-800 shadow-sm'
+                                            : 'text-stone-500 hover:text-stone-700'
+                                            }`}
+                                    >
+                                        Groups
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAccessTab('members')}
+                                        className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${accessTab === 'members'
+                                            ? 'bg-white text-stone-800 shadow-sm'
+                                            : 'text-stone-500 hover:text-stone-700'
+                                            }`}
+                                    >
+                                        Members
+                                    </button>
                                 </div>
+
+                                {/* Groups Content */}
+                                {accessTab === 'groups' && (
+                                    <div className="bg-stone-50 rounded-lg p-4 max-h-64 overflow-y-auto">
+                                        <p className="text-xs text-stone-500 mb-3">
+                                            Select groups ({selectedGroups.length} selected)
+                                        </p>
+                                        {/* DEBUG INFO - REMOVED FOR PRODUCTION
+                                        <div className="bg-yellow-100 p-2 mb-3 text-xs">
+                                            DEBUG: selectedGroups = {JSON.stringify(selectedGroups)}
+                                        </div>
+                                        */}
+                                        {groups.length === 0 ? (
+                                            <p className="text-sm text-stone-400 text-center py-4">No groups available</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {groups.map((group) => {
+                                                    const isChecked = selectedGroups.includes(group.id);
+                                                    console.log(`[Checkbox Render] Group: ${group.name}, ID: ${group.id}, isChecked: ${isChecked}, selectedGroups:`, selectedGroups);
+                                                    return (
+                                                        <label
+                                                            key={group.id}
+                                                            className="flex items-center gap-3 p-3 bg-white rounded-lg hover:bg-stone-100 cursor-pointer transition-colors"
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isChecked}
+                                                                onChange={(e) => {
+                                                                    console.log(`[Checkbox Change] Group: ${group.name}, checked: ${e.target.checked}`);
+                                                                    if (e.target.checked) {
+                                                                        setSelectedGroups([...selectedGroups, group.id]);
+                                                                    } else {
+                                                                        setSelectedGroups(selectedGroups.filter(id => id !== group.id));
+                                                                    }
+                                                                }}
+                                                                className="w-5 h-5 text-orange-600 bg-gray-100 border-gray-300 rounded focus:ring-orange-500 focus:ring-2 accent-orange-600 cursor-pointer"
+                                                            />
+                                                            <div className="flex items-center gap-2 flex-1">
+                                                                <div
+                                                                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold"
+                                                                    style={{ backgroundColor: group.color || '#f97316' }}
+                                                                >
+                                                                    {group.icon || '👥'}
+                                                                </div>
+                                                                <div>
+                                                                    <div className="text-sm font-medium text-stone-700">{group.name}</div>
+                                                                    <div className="text-xs text-stone-500">{group.members.length} members</div>
+                                                                </div>
+                                                            </div>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Members Content */}
+                                {accessTab === 'members' && (
+                                    <div className="bg-stone-50 rounded-lg p-4 max-h-64 overflow-y-auto">
+                                        <p className="text-xs text-stone-500 mb-3">
+                                            Select members ({selectedMembers.length} selected)
+                                        </p>
+                                        {users.length === 0 ? (
+                                            <p className="text-sm text-stone-400 text-center py-4">No other users available</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {users.map((user) => (
+                                                    <label
+                                                        key={user.id}
+                                                        className="flex items-center gap-3 p-3 bg-white rounded-lg hover:bg-stone-100 cursor-pointer transition-colors"
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedMembers.includes(user.id)}
+                                                            onChange={(e) => {
+                                                                if (e.target.checked) {
+                                                                    setSelectedMembers([...selectedMembers, user.id]);
+                                                                } else {
+                                                                    setSelectedMembers(selectedMembers.filter(id => id !== user.id));
+                                                                }
+                                                            }}
+                                                            className="w-5 h-5 text-orange-600 bg-gray-100 border-gray-300 rounded focus:ring-orange-500 focus:ring-2 accent-orange-600 cursor-pointer"
+                                                        />
+                                                        <div className="flex items-center gap-2 flex-1">
+                                                            <img
+                                                                src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=f97316&color=fff`}
+                                                                alt={user.name}
+                                                                className="w-8 h-8 rounded-full object-cover"
+                                                            />
+                                                            <div>
+                                                                <div className="text-sm font-medium text-stone-700">{user.name}</div>
+                                                                <div className="text-xs text-stone-500">{user.email}</div>
+                                                            </div>
+                                                        </div>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
+
                             <Button type="submit" className="w-full py-3 mt-4">
                                 {editAlbum ? 'Save Changes' : 'Create Secure Album'}
                             </Button>
@@ -417,6 +616,6 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     )}
                 </div>
             </div>
-        </div>
+        </div >
     );
 };

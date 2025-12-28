@@ -5,7 +5,11 @@ import { AIAnalysisResult } from "../types";
 // This prevents the app from crashing on startup if the API key is not yet available,
 // which fixes the "Container failed to start" error.
 const getAI = () => {
-  return new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'your_api_key_here') {
+    throw new Error('GEMINI_API_KEY_MISSING');
+  }
+  return new GoogleGenAI({ apiKey });
 };
 
 /* ----------------------- SCHEMA ----------------------- */
@@ -74,7 +78,7 @@ export const analyzeImage = async (
             },
           },
           {
-            text: "Analyze this family photo. Create a heartwarming caption, 3–5 tags, and a short album name.",
+            text: "Analyze this image and provide: a warm family-oriented caption, relevant tags for categorization, and suggest an album name. Respond in JSON format.",
           },
         ],
       },
@@ -89,8 +93,18 @@ export const analyzeImage = async (
     if (!text) throw new Error("Empty response from Gemini");
 
     return JSON.parse(text);
-  } catch (error) {
-    console.error("Gemini Analysis Error:", error);
+  } catch (error: any) {
+    // Silently return defaults when API fails (expired key, network issues, etc.)
+    // This prevents error spam in console while app still functions
+
+    // Only log once per session
+    if (!sessionStorage.getItem('gemini_warning_shown')) {
+      console.warn('⚠️ Gemini AI is unavailable (API key may be expired). Using default values.');
+      console.info('💡 Get a new API key at: https://makersuite.google.com/app/apikey');
+      sessionStorage.setItem('gemini_warning_shown', 'true');
+    }
+
+    // Return default values - app still works without AI
     return {
       caption: "A beautiful memory.",
       tags: ["Family", "Memory"],

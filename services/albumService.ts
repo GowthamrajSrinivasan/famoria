@@ -44,6 +44,7 @@ export const createAlbum = async (
         privacy,
         members: [...new Set([createdBy, ...members])], // Ensure creator is in members
         photoCount: 0,
+        videoCount: 0,
         coverPhoto: null
     };
 
@@ -56,7 +57,7 @@ export const createAlbum = async (
  */
 export const updateAlbum = async (
     albumId: string,
-    updates: Partial<Pick<Album, 'name' | 'description' | 'privacy' | 'members'>>
+    updates: Partial<Pick<Album, 'name' | 'description' | 'members'>>
 ): Promise<void> => {
     if (updates.name && updates.name.length > 50) {
         throw new Error('Album name must be 50 characters or less');
@@ -66,9 +67,14 @@ export const updateAlbum = async (
         throw new Error('Description must be 500 characters or less');
     }
 
+    // Filter out undefined values (Firestore doesn't allow them)
+    const cleanedUpdates = Object.fromEntries(
+        Object.entries(updates).filter(([_, value]) => value !== undefined)
+    );
+
     const albumRef = doc(db, ALBUMS_COLLECTION, albumId);
     await updateDoc(albumRef, {
-        ...updates,
+        ...cleanedUpdates,
         updatedAt: serverTimestamp()
     });
 };
@@ -110,7 +116,7 @@ export const subscribeToAlbums = (
 
     return onSnapshot(
         q,
-        (snapshot) => {
+        async (snapshot) => {
             const albums: Album[] = snapshot.docs.map(doc => {
                 const data = doc.data();
                 return {
@@ -121,11 +127,29 @@ export const subscribeToAlbums = (
                     createdBy: data.createdBy,
                     createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
                     updatedAt: data.updatedAt?.toMillis?.() || data.updatedAt || Date.now(),
-                    privacy: data.privacy,
+                    accessType: data.accessType || 'members',
+                    selectedGroups: data.selectedGroups || [],
                     members: data.members || [],
-                    photoCount: data.photoCount || 0
+                    photoCount: data.photoCount !== undefined ? data.photoCount : 0,
+                    videoCount: data.videoCount !== undefined ? data.videoCount : 0
                 } as Album;
             });
+
+            // Auto-migrate albums without videoCount (one-time fix)
+            snapshot.docs.forEach(async (docSnapshot) => {
+                const data = docSnapshot.data();
+                if (data.videoCount === undefined) {
+                    console.log(`[AlbumService] Migrating album ${data.name} - adding videoCount`);
+                    try {
+                        await updateDoc(doc(db, ALBUMS_COLLECTION, docSnapshot.id), {
+                            videoCount: 0
+                        });
+                    } catch (error) {
+                        console.error(`[AlbumService] Failed to migrate album ${docSnapshot.id}:`, error);
+                    }
+                }
+            });
+
             onUpdate(albums);
         },
         (error) => {
@@ -156,9 +180,11 @@ export const searchAlbums = async (userId: string, searchTerm: string): Promise<
                 createdBy: data.createdBy,
                 createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
                 updatedAt: data.updatedAt?.toMillis?.() || data.updatedAt || Date.now(),
-                privacy: data.privacy,
+                accessType: data.accessType || 'members',
+                selectedGroups: data.selectedGroups || [],
                 members: data.members || [],
-                photoCount: data.photoCount || 0
+                photoCount: data.photoCount || 0,
+                videoCount: data.videoCount || 0
             } as Album;
         })
         .filter(album =>
@@ -196,6 +222,38 @@ export const decrementPhotoCount = async (albumId: string): Promise<void> => {
         const currentCount = snapshot.docs[0].data().photoCount || 0;
         await updateDoc(albumRef, {
             photoCount: Math.max(0, currentCount - 1),
+            updatedAt: serverTimestamp()
+        });
+    }
+};
+
+/**
+ * Increment album video count
+ */
+export const incrementVideoCount = async (albumId: string): Promise<void> => {
+    const albumRef = doc(db, ALBUMS_COLLECTION, albumId);
+    const snapshot = await getDocs(query(collection(db, ALBUMS_COLLECTION), where('__name__', '==', albumId)));
+
+    if (!snapshot.empty) {
+        const currentCount = snapshot.docs[0].data().videoCount || 0;
+        await updateDoc(albumRef, {
+            videoCount: currentCount + 1,
+            updatedAt: serverTimestamp()
+        });
+    }
+};
+
+/**
+ * Decrement album video count
+ */
+export const decrementVideoCount = async (albumId: string): Promise<void> => {
+    const albumRef = doc(db, ALBUMS_COLLECTION, albumId);
+    const snapshot = await getDocs(query(collection(db, ALBUMS_COLLECTION), where('__name__', '==', albumId)));
+
+    if (!snapshot.empty) {
+        const currentCount = snapshot.docs[0].data().videoCount || 0;
+        await updateDoc(albumRef, {
+            videoCount: Math.max(0, currentCount - 1),
             updatedAt: serverTimestamp()
         });
     }

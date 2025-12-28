@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Plus, Search, LogOut, Grid, Image as ImageIcon, FolderOpen } from 'lucide-react';
+import { Camera, Plus, Search, LogOut, Grid, Image as ImageIcon, FolderOpen, Users, Film } from 'lucide-react';
 import { Photo, Post, ViewState, Album } from './types';
 import { PhotoCard } from './components/PhotoCard';
 import { Uploader } from './components/Uploader';
@@ -12,6 +12,9 @@ import { AlbumGrid } from './components/AlbumGrid';
 import { CreateAlbumModal } from './components/CreateAlbumModal';
 import { AlbumView } from './components/AlbumView';
 import { useAutoLock } from './hooks/useAutoLock';
+import { MembersPage } from './components/MembersPage';
+import { VideoGrid } from './components/VideoGrid';
+import { VideoUploader } from './components/VideoUploader';
 
 function ProtectedApp() {
   useAutoLock(); // Initialize auto-lock
@@ -31,11 +34,29 @@ function ProtectedApp() {
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = photoService.subscribeToPostsFeed(user.id, (newPosts) => {
-      setPosts(newPosts);
-    });
+    let isMounted = true;
+    let unsubscribe: (() => void) | null = null;
 
-    return () => unsubscribe();
+    try {
+      unsubscribe = photoService.subscribeToPostsFeed(user.id, (newPosts) => {
+        if (isMounted) {
+          setPosts(newPosts);
+        }
+      });
+    } catch (error) {
+      console.error('[App] Error subscribing to posts feed:', error);
+    }
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) {
+        try {
+          unsubscribe();
+        } catch (error) {
+          console.error('[App] Error unsubscribing from posts feed:', error);
+        }
+      }
+    };
   }, [user]);
 
   useEffect(() => {
@@ -137,6 +158,26 @@ function ProtectedApp() {
                 <FolderOpen size={16} className="inline mr-1.5" />
                 Albums
               </button>
+              <button
+                onClick={() => setView(ViewState.VIDEOS)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === ViewState.VIDEOS
+                  ? 'bg-white text-stone-800 shadow-sm'
+                  : 'text-stone-500 hover:text-stone-700'
+                  }`}
+              >
+                <Film size={16} className="inline mr-1.5" />
+                Videos
+              </button>
+              <button
+                onClick={() => setView(ViewState.MEMBERS)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === ViewState.MEMBERS
+                  ? 'bg-white text-stone-800 shadow-sm'
+                  : 'text-stone-500 hover:text-stone-700'
+                  }`}
+              >
+                <Users size={16} className="inline mr-1.5" />
+                Members
+              </button>
             </div>
 
             <div className="flex items-center gap-3 pl-6">
@@ -228,6 +269,9 @@ function ProtectedApp() {
               currentUserId={user?.id}
               onCreateAlbum={() => setShowCreateAlbumModal(true)}
               onEditAlbum={(album) => {
+                console.log('[App] OnEditAlbum called with album:', album);
+                console.log('[App] Album groups field:', album.groups);
+                console.log('[App] Album members field:', album.members);
                 setEditAlbum(album);
                 setShowCreateAlbumModal(true);
               }}
@@ -244,6 +288,7 @@ function ProtectedApp() {
             <AlbumView
               album={selectedAlbum}
               currentUserId={user?.id}
+              currentUser={user}
               onBack={() => setView(ViewState.ALBUMS)}
               onEdit={() => {
                 setEditAlbum(selectedAlbum);
@@ -254,8 +299,38 @@ function ProtectedApp() {
                 setSelectedAlbum(null);
               }}
               onUpload={() => setView(ViewState.UPLOAD)}
+              onUploadVideo={() => setView(ViewState.VIDEO_UPLOAD)}
               onPhotoClick={(photo) => setSelectedPhoto(photo)}
             />
+          </div>
+        )}
+
+        {view === ViewState.VIDEO_UPLOAD && selectedAlbum && (
+          <div className="max-w-3xl mx-auto animate-fade-in-up">
+            <button
+              className="group flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-800 transition-colors mb-6 pl-1"
+              onClick={() => setView(ViewState.ALBUM_VIEW)}
+            >
+              <span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Back to Album
+            </button>
+            <VideoUploader
+              currentUser={user!}
+              albumId={selectedAlbum.id}
+              onUploadComplete={() => setView(ViewState.ALBUM_VIEW)}
+              onClose={() => setView(ViewState.ALBUM_VIEW)}
+            />
+          </div>
+        )}
+
+        {view === ViewState.VIDEOS && (
+          <div className="animate-fade-in-up">
+            <VideoGrid currentUser={user} />
+          </div>
+        )}
+
+        {view === ViewState.MEMBERS && (
+          <div className="animate-fade-in-up">
+            <MembersPage onBack={() => setView(ViewState.GALLERY)} currentUserId={user?.id} />
           </div>
         )}
       </main>

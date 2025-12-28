@@ -68,6 +68,9 @@ export interface Comment {
   userAvatar: string;
   text: string;
   createdAt: number; // Timestamp
+  updatedAt?: number; // Timestamp for edits
+  likes?: string[]; // Array of user IDs who liked this comment
+  replyTo?: string; // ID of parent comment if this is a reply
   mentions?: string[]; // Array of mentioned user IDs
   voiceNote?: {
     audioUrl: string;
@@ -76,11 +79,15 @@ export interface Comment {
   };
 }
 
+
 export enum ViewState {
   GALLERY = 'GALLERY',
   UPLOAD = 'UPLOAD',
+  VIDEO_UPLOAD = 'VIDEO_UPLOAD',
   ALBUMS = 'ALBUMS',
-  ALBUM_VIEW = 'ALBUM_VIEW'
+  ALBUM_VIEW = 'ALBUM_VIEW',
+  MEMBERS = 'MEMBERS',
+  VIDEOS = 'VIDEOS'
 }
 
 export interface Album {
@@ -91,9 +98,11 @@ export interface Album {
   createdBy: string; // User ID
   createdAt: number; // Timestamp
   updatedAt: number; // Timestamp
-  privacy: 'private' | 'family' | 'public';
-  members: string[]; // Array of user IDs who can access
-  photoCount?: number; // Cached count
+  accessType: 'groups' | 'members'; // Groups or individual members
+  selectedGroups?: string[]; // Array of group IDs (if accessType is 'groups')
+  members: string[]; // Array of user IDs who can access (if accessType is 'members', or expanded from groups)
+  photoCount?: number; // Cached count of photos/posts
+  videoCount?: number; // Cached count of videos
 }
 
 export interface UploadProgress {
@@ -122,4 +131,61 @@ export interface Notification {
   photoId?: string;
   createdAt: number;
   isRead: boolean;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  description?: string;
+  createdBy: string; // User ID of creator
+  createdAt: number;
+  updatedAt: number;
+  members: string[]; // Array of user IDs
+  color?: string; // Optional color for the group
+  icon?: string; // Optional icon/emoji for the group
+}
+
+export interface Video {
+  id: string;
+  url: string;
+  thumbnailUrl?: string;
+  title: string;
+  description?: string;
+  tags: string[];
+
+  // Metadata
+  duration: number;
+  size: number;
+  format: string;
+  resolution: string;
+  aspectRatio: string;
+
+  // Upload info
+  uploadedBy: string;
+  author: string;
+  uploadDate: any;
+
+  // Interactions
+  likes: string[];
+  commentsCount: number;
+  viewsCount: number;
+
+  // Organization
+  albumId?: string;
+  isProcessing: boolean;
+  processingError?: string;
+
+  // Privacy
+  isPublic: boolean;
+  allowedUsers?: string[];
+
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface VideoUploadProgress {
+  fileName: string;
+  progress: number;
+  status: 'uploading' | 'processing' | 'complete' | 'error';
+  error?: string;
 }

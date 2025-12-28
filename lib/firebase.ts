@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 // Using environment variables for configuration.
@@ -54,23 +54,21 @@ console.log('Firebase Config:', {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// Initialize Firestore with modern cache settings (replaces deprecated enableIndexedDbPersistence)
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
+
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('https://www.googleapis.com/auth/drive.appdata');
 
-// Enable offline persistence for better offline support
-enableIndexedDbPersistence(db).catch((err) => {
-  if (err.code === 'failed-precondition') {
-    console.warn('Persistence failed: Multiple tabs open');
-  } else if (err.code === 'unimplemented') {
-    console.warn('Persistence not available in this browser');
-  }
-});
-
 // Debug: Verify services initialized
 console.log('Firebase Services:', {
   auth: auth ? '✓ Initialized' : '✗ Failed',
-  db: db ? '✓ Initialized' : '✗ Failed',
+  db: db ? '✓ Initialized with persistent cache' : '✗ Failed',
   storage: storage ? '✓ Initialized' : '✗ Failed'
 });
