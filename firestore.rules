@@ -220,6 +220,21 @@ service cloud.firestore {
                        request.auth.uid == resource.data.userId;
     }
 
+    // Notifications - users can read/delete their own notifications
+    match /notifications/{notificationId} {
+      // Allow read if the notification belongs to the user
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+
+      // Allow create by any authenticated user (to notify others)
+      allow create: if request.auth != null;
+
+      // Allow update (mark as read) only by the owner
+      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
+
+      // Allow delete only by the owner
+      allow delete: if request.auth != null && request.auth.uid == resource.data.userId;
+    }
+
     // Fallback: deny all other access
     match /{document=**} {
       allow read, write: if false;
