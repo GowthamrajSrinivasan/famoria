@@ -14,6 +14,7 @@
     "sign_out": "Sign Out",
     "shared_moments_count": "You have <1>{{count}}</1> shared moments",
     "add_memory": "Add New Memory",
+    "welcome_user": "Welcome, {{name}}",
     "sort_by": "Sort by:",
     "sort_newest": "Newest First",
     "sort_oldest": "Oldest First",

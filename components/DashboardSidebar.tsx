@@ -3,6 +3,7 @@ import { ViewState } from '../types';
 import { Camera, Grid, FolderOpen, Film, Users, LogOut, ChevronRight, ChevronLeft, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { signOut as firebaseSignOut } from 'firebase/auth'; // Direct import or pass via props?
+import { LanguageSwitcher } from './LanguageSwitcher';
 // Better to pass signOut via props to keep it pure-ish or stick to pattern in App.tsx usage
 
 interface DashboardSidebarProps {
@@ -107,13 +108,16 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
                     )}
 
                     {!isCollapsed && (
-                        <button
-                            onClick={onSignOut}
-                            className="text-white/50 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
-                            title={t('sign_out')}
-                        >
-                            <LogOut size={16} />
-                        </button>
+                        <>
+                            <LanguageSwitcher variant="ghost" direction="up" />
+                            <button
+                                onClick={onSignOut}
+                                className="text-white/50 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
+                                title={t('sign_out')}
+                            >
+                                <LogOut size={16} />
+                            </button>
+                        </>
                     )}
                 </div>
             </div>

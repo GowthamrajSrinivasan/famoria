@@ -16,6 +16,7 @@ i18n
     // for all options read: https://www.i18next.com/overview/configuration-options
     .init({
         fallbackLng: 'en',
+        load: 'languageOnly', // Forces 'en-US' -> 'en', solving the missing key issue for en-IN
         debug: true,
 
         interpolation: {

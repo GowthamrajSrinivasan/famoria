@@ -3,6 +3,7 @@ import { Post, User, ViewState } from '../types';
 import { DashboardHero } from './DashboardHero';
 import { DashboardSidebar } from './DashboardSidebar';
 import { useAuth } from '../context/AuthContext'; // Import useAuth if needed for logic here
+import { useTranslation } from 'react-i18next';
 
 interface ImmersiveDashboardProps {
     currentUser: User | null;
@@ -19,6 +20,7 @@ export const ImmersiveDashboard: React.FC<ImmersiveDashboardProps> = ({
     onSignOut,
     onAddNewMemory
 }) => {
+    const { t } = useTranslation();
     // Pick a random featured post on mount
     // We use useMemo but with a dependency on posts.length to re-roll if posts change significantly 
     // or actually just once on mount to avoid jitter.
@@ -38,6 +40,13 @@ export const ImmersiveDashboard: React.FC<ImmersiveDashboardProps> = ({
         <div className="relative w-screen h-screen overflow-hidden bg-stone-900">
             {/* Main Hero Area - Background Layer */}
             <div className="absolute inset-0 w-full h-full z-10">
+                {/* Top Left Welcome Message */}
+                <div className="absolute top-8 left-8 z-20 animate-fade-in-down">
+                    <h2 className="text-white text-3xl md:text-5xl font-serif font-bold drop-shadow-lg shadow-black/20 tracking-tight leading-tight">
+                        {t('welcome_user', { name: currentUser?.name?.split(' ')[0] || 'Member' })}
+                    </h2>
+                </div>
+
                 <DashboardHero
                     post={featuredPost}
                 />
