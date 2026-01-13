@@ -3,15 +3,9 @@ import { User } from '../types';
 import { auth, googleProvider, db } from '../lib/firebase';
 import { signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { saveMasterKey, getMasterKey, getDeviceKey } from '../lib/crypto/keyStore';
-import { broadcastUnlock, broadcastLock, setupKeySync } from '../lib/crypto/unlock';
 import { cacheService } from '../services/cacheService';
-import { subscribeToAlbums } from '../services/albumService';
-import { generateAndStoreDeviceKey, wrapMasterKeyForDevice, unwrapMasterKeyWithDevice } from '../lib/crypto/deviceKey';
-import { fetchDriveBlob } from '../services/driveService';
-import { fromBase64 } from '../lib/crypto/masterKey';
-
-// ... imports
+import { familyService } from '../services/familyService';
+import { getFamilyKey, deleteFamilyKey, saveFamilyKey } from '../lib/crypto/keyStore';
 
 interface AuthContextType {
   user: User | null;
@@ -22,13 +16,11 @@ interface AuthContextType {
   googleAccessToken: string | null;
   refreshDriveToken: () => Promise<string | null>;
 
-  // Keyring Interface
-  albumKeys: Record<string, Uint8Array>;
-  unlockAlbum: (albumId: string, key: Uint8Array) => void;
-  lockAlbum: (albumId: string) => void;
-  getAlbumKey: (albumId: string) => Uint8Array | null;
-  lockAll: () => void;
-  autoUnlockAlbum: (albumId: string) => Promise<boolean>;
+  // Family Key Interface
+  familyKey: Uint8Array | null;
+  isFamilyAuthenticated: boolean;
+  setupFamily: () => Promise<void>;
+  lockFamily: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -40,12 +32,10 @@ const AuthContext = createContext<AuthContextType>({
   googleAccessToken: null,
   refreshDriveToken: async () => null,
 
-  albumKeys: {},
-  unlockAlbum: () => { },
-  lockAlbum: () => { },
-  getAlbumKey: () => null,
-  lockAll: () => { },
-  autoUnlockAlbum: async () => false,
+  familyKey: null,
+  isFamilyAuthenticated: false,
+  setupFamily: async () => { },
+  lockFamily: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -56,56 +46,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [error, setError] = useState<string | null>(null);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
 
-  // Keyring State
-  const [albumKeys, setAlbumKeys] = useState<Record<string, Uint8Array>>({});
-  const albumKeysRef = React.useRef(albumKeys);
+  // Family Key State
+  const [familyKey, setFamilyKey] = useState<Uint8Array | null>(null);
+  const [isFamilyAuthenticated, setIsFamilyAuthenticated] = useState(false);
 
-  useEffect(() => {
-    albumKeysRef.current = albumKeys;
-  }, [albumKeys]);
+  const lockFamily = async () => {
+    setFamilyKey(null);
+    setIsFamilyAuthenticated(false);
 
-  const unlockAlbum = async (albumId: string, masterKey: Uint8Array) => {
-    albumKeysRef.current[albumId] = masterKey;
-    setAlbumKeys({ ...albumKeysRef.current });
-
-    // Save MasterKey to IndexedDB for instant unlock on refresh
     try {
-      await saveMasterKey(albumId, masterKey);
-      console.log(`[AuthContext] MasterKey saved to IDB for instant unlock`);
-    } catch (err) {
-      console.error('[AuthContext] Failed to save MasterKey to IDB:', err);
+      // Clear from IDB (Secure Logout)
+      await deleteFamilyKey();
+
+      // Clear all decrypted cache for security
+      // We catch this specifically to avoid blocking if cache clearing fails
+      await cacheService.clearAllCache().catch(e => console.error('Cache clear failed:', e));
+    } catch (e) {
+      console.error('Error during family lock:', e);
     }
-
-    // Broadcast unlock
-    broadcastUnlock(albumId, masterKey);
-  };
-
-  const lockAlbum = (albumId: string) => {
-    setAlbumKeys(prev => {
-      const newKeys = { ...prev };
-      delete newKeys[albumId];
-      return newKeys;
-    });
-
-    // Clear decrypted cache for security
-    cacheService.clearAlbumCache(albumId).catch(console.error);
-  };
-
-  const getAlbumKey = (albumId: string) => albumKeys[albumId] || null;
-
-  const lockAll = () => {
-    setAlbumKeys({});
-
-    // Clear all decrypted cache for security
-    cacheService.clearAllCache().catch(console.error);
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      // ... existing user fetching logic ...
       if (firebaseUser) {
         try {
-          // ... fetch user ...
+          // Sync user data
           const userRef = doc(db, 'users', firebaseUser.uid);
           const userSnap = await getDoc(userRef);
 
@@ -142,7 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         setUser(null);
         setGoogleAccessToken(null);
-        lockAll(); // Local clear
+        lockFamily(); // Local clear
       }
       setLoading(false);
     });
@@ -150,40 +115,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
-  // Auto-unlock all albums when user is available (page load/refresh)
-  // This runs FIRST to check IndexedDB for stored MasterKeys (no Drive token needed!)
+  // Initialize Family Key on User Login
   useEffect(() => {
-    if (user) {
-      console.log('[AuthContext] User authenticated, triggering immediate auto-unlock from IndexedDB');
-      autoUnlockAllAlbums(user.id);
-    }
-  }, [user]); // Runs when user becomes available
+    const initFamilyKey = async () => {
+      if (!user) {
+        setFamilyKey(null);
+        setIsFamilyAuthenticated(false);
+        return;
+      }
 
-  // Auto-unlock all albums when Google token becomes available after sign-in
-  // This provides a second attempt if IndexedDB unlock failed
-  useEffect(() => {
-    if (user && googleAccessToken) {
-      console.log('[AuthContext] Google token available, triggering Drive-based auto-unlock for all albums');
-      autoUnlockAllAlbums(user.id);
-    }
+      console.log('[AuthContext] Initializing Family Key...');
+
+      // 1. Check Local IDB
+      let key = await getFamilyKey();
+
+      // 2. If missing, try to restore from Drive (if token available)
+      if (!key && googleAccessToken) {
+        console.log('[AuthContext] Local key missing, checking Drive...');
+        key = await familyService.restoreKeyFromDrive(googleAccessToken);
+        if (key) {
+          console.log('[AuthContext] Key restored from Drive!');
+        }
+      }
+
+      if (key) {
+        setFamilyKey(key);
+        setIsFamilyAuthenticated(true);
+        console.log('[AuthContext] Family Authentication Successful');
+
+        // Verify IDB persistence (Double Check)
+        try {
+          const inIdb = await getFamilyKey();
+          if (!inIdb) {
+            console.log('[AuthContext] Key in memory but missing from IDB. Saving...');
+            await saveFamilyKey(key);
+          }
+        } catch (e) {
+          console.error('[AuthContext] Failed to verify IDB persistence', e);
+        }
+      } else {
+        console.log('[AuthContext] No Family Key found. User needs to Setup or Recover.');
+        setIsFamilyAuthenticated(false);
+      }
+    };
+
+    initFamilyKey();
   }, [user, googleAccessToken]);
-
-
-  // Sync Master Key across tabs
-  useEffect(() => {
-    if (!user) return;
-
-    const cleanup = setupKeySync({
-      onUnlock: (albumId, key) => {
-        setAlbumKeys(prev => ({ ...prev, [albumId]: key }));
-      },
-      onLockAll: () => {
-        setAlbumKeys({});
-      },
-      getKeys: () => albumKeysRef.current
-    });
-    return cleanup;
-  }, [user]); // Run only when user session starts/changes
 
   const signIn = async () => {
     setLoading(true);
@@ -218,158 +195,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     try {
-      // Broadcast lock before signing out
-      broadcastLock();
-
       await firebaseSignOut(auth);
-      setGoogleAccessToken(null);
-      lockAll();
+      // State cleanup is handled by onAuthStateChanged listener
     } catch (err) {
       console.error("Logout failed", err);
     }
   };
 
-  // V4: Auto-Unlock from IDB or Drive
-  const autoUnlockAlbum = async (albumId: string): Promise<boolean> => {
-    // 1. Check if already unlocked
-    if (albumKeysRef.current[albumId]) {
-      console.log(`[AuthContext] Album ${albumId} already unlocked`);
-      return true;
-    }
+  const setupFamily = async () => {
+    if (!user) return;
 
-    // 2. FASTEST PATH: Check IndexedDB for plain MasterKey (no Drive token needed!)
-    try {
-      console.log(`[AuthContext] Checking IndexedDB for MasterKey: ${albumId}`);
-      const masterKey = await getMasterKey(albumId);
+    let token = googleAccessToken;
+    if (!token) token = await refreshDriveToken();
+    if (!token) throw new Error("Google Drive access required to setup Family Vault");
 
-      if (masterKey) {
-        console.log(`[AuthContext] MasterKey found in IDB, unlocking instantly!`);
-        unlockAlbum(albumId, masterKey);
-        return true;
-      } else {
-        console.log(`[AuthContext] No MasterKey in IDB for ${albumId}`);
-      }
-    } catch (e) {
-      console.error("[AuthContext] IDB MasterKey check failed:", e);
-    }
+    console.log('[AuthContext] Creating new Family Master Key...');
+    const key = await familyService.createFamilyKey(token);
 
-    // 3. Try DeviceKey path (hardware-bound security)
-    try {
-      console.log(`[AuthContext] Checking IndexedDB for DeviceKey: ${albumId}`);
-      const deviceKey = await getDeviceKey(albumId);
-      if (deviceKey) {
-        console.log(`[AuthContext] DeviceKey found in IndexedDB for ${albumId}`);
-
-        // 4. We have a Device Key (Authorized Device). Fetch Encryption Blob from Drive.
-        let token = googleAccessToken;
-        if (!token) {
-          console.log(`[AuthContext] No Google token, attempting refresh...`);
-          token = await refreshDriveToken();
-        }
-        if (!token) {
-          console.log(`[AuthContext] Failed to get Google Drive token`);
-          return false;
-        }
-
-        // 5. Fetch Blob
-        console.log(`[AuthContext] Fetching Drive blob for album ${albumId}`);
-
-        const filename = `famoria_album_${albumId}.key`;
-        const blobDef = await fetchDriveBlob(filename, token);
-
-        if (!blobDef) {
-          console.log(`[AuthContext] No Drive blob found for ${filename}`);
-          // Fall through to Drive fallback
-        } else {
-          console.log(`[AuthContext] Drive blob fetched successfully`);
-
-          // 6. Unwrap
-          console.log(`[AuthContext] Unwrapping Master Key using DeviceKey...`);
-          const masterKey = await unwrapMasterKeyWithDevice(
-            albumId,
-            blobDef.encryptedMasterKey,
-            blobDef.iv,
-            blobDef.authTag
-          );
-
-          if (masterKey) {
-            console.log(`[AuthContext] Master Key unwrapped successfully, unlocking album`);
-            unlockAlbum(albumId, masterKey);
-            return true;
-          } else {
-            console.log(`[AuthContext] Failed to unwrap Master Key`);
-          }
-        }
-      } else {
-        console.log(`[AuthContext] No DeviceKey found in IndexedDB for ${albumId}`);
-      }
-    } catch (e) {
-      console.error("[AuthContext] DeviceKey path failed:", e);
-    }
-
-    // 4. Drive Fallback Path - Fetch plain MasterKey directly
-    console.log(`[AuthContext] Attempting Drive fallback to fetch plain MasterKey...`);
-    try {
-      let token = googleAccessToken;
-      if (!token) {
-        console.log(`[AuthContext] No Google token for Drive fallback, attempting refresh...`);
-        token = await refreshDriveToken();
-      }
-      if (!token) {
-        console.log(`[AuthContext] Failed to get Google Drive token for fallback`);
-        return false;
-      }
-
-      // Try to fetch plain MasterKey (new filename pattern)
-      const plainKeyFilename = `famoria_album_${albumId}_master.key`;
-      console.log(`[AuthContext] Fetching plain MasterKey from Drive: ${plainKeyFilename}`);
-
-      const plainKeyData = await fetchDriveBlob(plainKeyFilename, token);
-
-      if (plainKeyData && plainKeyData.masterKeyBase64) {
-        console.log(`[AuthContext] Plain MasterKey found in Drive, decoding...`);
-        const masterKey = fromBase64(plainKeyData.masterKeyBase64);
-        console.log(`[AuthContext] MasterKey decoded successfully, unlocking album`);
-        unlockAlbum(albumId, masterKey);
-        return true;
-      } else {
-        console.log(`[AuthContext] No plain MasterKey found in Drive for ${plainKeyFilename}`);
-      }
-    } catch (e) {
-      console.error("[AuthContext] Drive fallback failed:", e);
-    }
-
-    return false;
-  };
-
-  // Auto-unlock all user albums after sign-in
-  const autoUnlockAllAlbums = async (userId: string) => {
-    try {
-      console.log('[AuthContext] Auto-unlocking all albums for user:', userId);
-
-
-      // Subscribe to user albums and attempt unlock
-      const unsubscribe = subscribeToAlbums(userId, async (albums) => {
-        console.log(`[AuthContext] Found ${albums.length} albums, attempting auto-unlock...`);
-
-        // Attempt to unlock each album
-        const unlockPromises = albums.map(album =>
-          autoUnlockAlbum(album.id).catch(err => {
-            console.warn(`[AuthContext] Failed to auto-unlock album ${album.id}:`, err);
-            return false;
-          })
-        );
-
-        const results = await Promise.all(unlockPromises);
-        const successCount = results.filter(Boolean).length;
-        console.log(`[AuthContext] Auto-unlocked ${successCount}/${albums.length} albums`);
-
-        // Unsubscribe after first attempt
-        unsubscribe();
-      });
-    } catch (error) {
-      console.error('[AuthContext] Error during auto-unlock all:', error);
-    }
+    setFamilyKey(key);
+    setIsFamilyAuthenticated(true);
   };
 
   const value = {
@@ -381,12 +225,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     googleAccessToken,
     isDriveAuthenticated: !!googleAccessToken,
     refreshDriveToken,
-    albumKeys,
-    unlockAlbum,
-    lockAlbum,
-    getAlbumKey,
-    lockAll,
-    autoUnlockAlbum // Export this
+
+    // Family Key Exports
+    familyKey,
+    isFamilyAuthenticated,
+    setupFamily,
+    lockFamily
   };
 
   return (

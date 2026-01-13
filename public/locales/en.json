@@ -271,5 +271,19 @@
     "error_album_req_sugg": "Choose an album from the dropdown list.",
     "error_upload_failed": "Upload Failed",
     "error_upload_failed_msg": "Failed to queue secure photos.",
-    "error_upload_failed_sugg": "Please try again."
+    "error_upload_failed_sugg": "Please try again.",
+    "error_family_locked": "Family Vault Locked",
+    "error_family_locked_msg": "Your Family Vault is locked. Please unlock it to continue.",
+    "error_family_locked_sugg": "Unlock Vault",
+    "family_vault_setup": "Family Vault Setup",
+    "vault_setup_desc": "Secure your family's digital memories with end-to-end encryption. Only you and your invited family members hold the keys.",
+    "create_new_family": "Create New Family Vault",
+    "create_family_desc": "Start a fresh vault for your family. We'll generate a master key for you.",
+    "enter_recovery_key": "Recover Existing Vault",
+    "recover_family_desc": "If you already have a Family Key or Invite Link, paste it here to unlock access.",
+    "paste_key_instruction": "Paste your Recovery Key or Invite JSON",
+    "unlock_vault": "Unlock Vault",
+    "invalid_recovery_key": "Invalid Recovery Key",
+    "setting_up_vault": "Setting up Family Vault...",
+    "please_wait_encryption": "Generating keys and securing your environment. This may take a moment."
 }

@@ -5,15 +5,17 @@ const AUTO_LOCK_MS = 15 * 60 * 1000; // 15 minutes
 const LAST_ACTIVE_KEY = 'famoria_last_active';
 
 export function useAutoLock() {
-    const { albumKeys, lockAll } = useAuth();
-    const hasUnlockedAlbums = Object.keys(albumKeys).length > 0;
+    const { isFamilyAuthenticated, lockFamily } = useAuth();
+
+    // We only need to lock if we are currently authenticated
+    const shouldLock = isFamilyAuthenticated;
 
     const lock = useCallback(() => {
-        if (hasUnlockedAlbums) {
+        if (shouldLock) {
             console.log('🔒 Auto-locking session due to inactivity');
-            lockAll();
+            lockFamily();
         }
-    }, [hasUnlockedAlbums, lockAll]);
+    }, [shouldLock, lockFamily]);
 
     const updateActivity = useCallback(() => {
         localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
@@ -28,7 +30,7 @@ export function useAutoLock() {
     }, [lock]);
 
     useEffect(() => {
-        if (!hasUnlockedAlbums) return;
+        if (!shouldLock) return;
 
         // Initialize activity timestamp
         updateActivity();
@@ -54,11 +56,7 @@ export function useAutoLock() {
 
         // Visibility change handler
         const handleVisibilityChange = () => {
-            if (document.hidden) {
-                lock();
-            } else {
-                checkAutoLock();
-            }
+            checkAutoLock();
         };
 
         // Check periodically
@@ -72,7 +70,7 @@ export function useAutoLock() {
             clearInterval(interval);
             if (throttleTimeout) clearTimeout(throttleTimeout);
         };
-    }, [hasUnlockedAlbums, lock, updateActivity, checkAutoLock]);
+    }, [shouldLock, lock, updateActivity, checkAutoLock]);
 
     return { lock };
 }

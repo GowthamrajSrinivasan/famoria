@@ -29,7 +29,7 @@ function isPost(item: Photo | Post): item is Post {
 }
 
 export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser, onClose, onPhotoUpdate, onPhotoDelete }) => {
-  const { getAlbumKey } = useAuth();
+  const { familyKey } = useAuth();
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -57,8 +57,8 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
       return;
     }
 
-    const albumKey = getAlbumKey(photo.albumId);
-    if (!albumKey) {
+    const masterKey = familyKey;
+    if (!masterKey) {
       if ('url' in photo) {
         setDisplayUrls([photo.url || '']);
       }
@@ -87,7 +87,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
             if (!imageBlob) {
 
 
-              const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
+              const photoKey = await photoKeyModule.derivePhotoKey(masterKey, photoId);
               const pathToLoad = photoData.encryptedPath;
 
               if (pathToLoad) {
@@ -123,7 +123,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
               const actualPhotoId = photoDoc.id;
 
 
-              const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
+              const photoKey = await photoKeyModule.derivePhotoKey(masterKey, actualPhotoId);
 
               const pathToLoad = photoDoc.encryptedPath;
               if (pathToLoad) {
@@ -149,7 +149,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
     };
 
     decryptImages();
-  }, [photo.id, photo.isEncrypted, photo.albumId, getAlbumKey]);
+  }, [photo.id, photo.isEncrypted, photo.albumId, familyKey]);
 
   // Close on Escape, navigate with arrow keys
   useEffect(() => {

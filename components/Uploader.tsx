@@ -8,9 +8,6 @@ import { photoService } from '../services/photoService';
 import { subscribeToAlbums } from '../services/albumService';
 import { Photo, Album, Post } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { VaultUnlockModal } from './VaultUnlockModal';
-import { generateAndStoreDeviceKey, wrapMasterKeyForDevice } from '../lib/crypto/deviceKey';
-import { uploadDriveAppDataFile } from '../services/driveService';
 import { doc, setDoc, serverTimestamp, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import * as imageUtils from '../lib/imageUtils';
@@ -20,7 +17,7 @@ import { processInParallel } from '../lib/processInParallel';
 import { useUpload } from '../context/UploadContext';
 
 interface UploaderProps {
-  onUploadComplete: (posts: Post[]) => void; // Changed to Post[] for parallel uploads
+  onUploadComplete: (posts: Post[]) => void;
   onCancel: () => void;
   currentAlbumId?: string;
 }
@@ -56,13 +53,13 @@ interface ValidationError {
 
 export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, currentAlbumId }) => {
   const { t } = useTranslation();
-  const { user, getAlbumKey, unlockAlbum, googleAccessToken, refreshDriveToken } = useAuth();
+  const { user, familyKey, googleAccessToken, refreshDriveToken } = useAuth();
   const { addUploads } = useUpload();
   const [isDragging, setIsDragging] = useState(false);
-  const [filesToUpload, setFilesToUpload] = useState<File[]>([]); // Changed to array
-  const [previews, setPreviews] = useState<string[]>([]); // Array of preview URLs
+  const [filesToUpload, setFilesToUpload] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isQueueing, setIsQueueing] = useState(false); // Changed from isUploading
+  const [isQueueing, setIsQueueing] = useState(false);
   const [analysis, setAnalysis] = useState<{ caption: string; tags: string[]; album: string } | null>(null);
   const [validationError, setValidationError] = useState<ValidationError | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,15 +75,10 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
   const [newAlbumPrivacy, setNewAlbumPrivacy] = useState<'private' | 'family' | 'public'>('family');
   const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
 
-  // Unlock State
-  const [showUnlockModal, setShowUnlockModal] = useState(false);
-
   useEffect(() => {
     if (!user) return;
     const unsubscribe = subscribeToAlbums(user.id, (fetchedAlbums) => {
       setAlbums(fetchedAlbums);
-      // If no album is selected and we have albums, maybe default to the first one?
-      // Or if currentAlbumId was invalid, reset it.
     });
     return () => unsubscribe();
   }, [user]);
@@ -96,7 +88,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
   }, [currentAlbumId]);
 
   const validateFile = (file: File): ValidationError | null => {
-    // Check if it's an image
     if (!file.type.startsWith('image/')) {
       return {
         title: t('error_not_image'),
@@ -105,7 +96,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       };
     }
 
-    // Check file format
     if (!ALLOWED_FORMATS.includes(file.type.toLowerCase())) {
       const detectedType = file.type || 'Unknown';
       return {
@@ -115,7 +105,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       };
     }
 
-    // Check file size
     if (file.size > MAX_FILE_SIZE) {
       const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
       return {
@@ -125,7 +114,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       };
     }
 
-    // Check if file is suspiciously small (might be corrupted)
     if (file.size < 1024) {
       return {
         title: t('error_invalid_image'),
@@ -138,12 +126,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
   };
 
   const handleFiles = (files: FileList | File[]) => {
-    // Clear any previous errors
     setValidationError(null);
-
     const filesArray = Array.from(files);
 
-    // Check total count (including existing files)
     if (filesToUpload.length + filesArray.length > MAX_IMAGES_PER_POST) {
       setValidationError({
         title: t('error_too_many_images'),
@@ -153,7 +138,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       return;
     }
 
-    // Validate each file
     for (const file of filesArray) {
       const error = validateFile(file);
       if (error) {
@@ -162,11 +146,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       }
     }
 
-    // If all valid, add to state
     const newFiles = [...filesToUpload, ...filesArray];
     setFilesToUpload(newFiles);
 
-    // Generate previews for new files
     filesArray.forEach(file => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -176,12 +158,10 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       reader.readAsDataURL(file);
     });
 
-    // Clear the file input so the same files can be selected again
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
 
-    // Run AI analysis once all files are added
     if (newFiles.length > 0 && !isAnalyzing) {
       setTimeout(() => runAIAnalysis(newFiles), 100);
     }
@@ -193,7 +173,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     setFilesToUpload(newFiles);
     setPreviews(newPreviews);
 
-    // Re-run analysis if files remain
     if (newFiles.length > 0) {
       runAIAnalysis(newFiles);
     } else {
@@ -205,7 +184,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     setIsAnalyzing(true);
     try {
       if (files.length === 1) {
-        // Single image analysis
         const reader = new FileReader();
         reader.onload = async (e) => {
           const base64 = e.target?.result as string;
@@ -219,7 +197,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         };
         reader.readAsDataURL(files[0]);
       } else {
-        // Multi-image analysis
         const base64Array: string[] = [];
         const readPromises = files.map(file => {
           return new Promise<string>((resolve) => {
@@ -262,13 +239,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     }
   };
 
-  const handleUnlock = (key: Uint8Array) => {
-    unlockAlbum(selectedAlbumId, key);
-    setShowUnlockModal(false);
-    // Optional: Auto-retry upload?
-    // For now, let user click "Save" again to be safe/clear.
-  };
-
   const handleCreateAlbum = async () => {
     if (!newAlbumName.trim() || !user) {
       setValidationError({
@@ -281,46 +251,8 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
 
     setIsCreatingAlbum(true);
     try {
-      // 1. Get Google Drive access token
-      let token = googleAccessToken;
-      if (!token) {
-        token = await refreshDriveToken();
-        if (!token) throw new Error("Google Drive access required for secure storage.");
-      }
+      const albumId = crypto.randomUUID();
 
-      // 2. Generate Master Key (Raw Bytes) - 32 bytes CSPRNG
-      const masterKey = crypto.getRandomValues(new Uint8Array(32));
-      const masterKeyId = crypto.randomUUID();
-
-      // Helper: Convert to Base64
-      const toBase64 = (u8: Uint8Array) => btoa(String.fromCharCode(...u8));
-
-      // 3. Generate Hardware DeviceKey & Store in IndexedDB
-      const deviceKey = await generateAndStoreDeviceKey(masterKeyId);
-
-      // 4. Create TWO versions of MK for Drive:
-      const plainMasterKeyB64 = toBase64(masterKey);
-      const { encryptedMasterKey, iv, authTag } = await wrapMasterKeyForDevice(masterKey, deviceKey);
-
-      // 5. Construct Drive Blob (V4 Format with BOTH layers)
-      const driveBlob = {
-        version: 4,
-        masterKeyId,
-        recoveryKey: plainMasterKeyB64,
-        encryptedMasterKey,
-        iv,
-        authTag,
-        createdAt: Date.now()
-      };
-
-      // 6. Upload to Drive
-
-      const filename = `famoria_album_${masterKeyId}.key`;
-      await uploadDriveAppDataFile(filename, JSON.stringify(driveBlob), token!);
-
-      // 7. Create Album in Firestore
-
-      const albumId = masterKeyId;
       await setDoc(doc(db, 'albums', albumId), {
         id: albumId,
         name: newAlbumName.trim(),
@@ -329,7 +261,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         createdBy: user.id,
         userId: user.id,
         members: [user.id],
-        masterKeyId: masterKeyId,
+        masterKeyId: 'FAMILY_MASTER_KEY',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         coverPhoto: null,
@@ -338,19 +270,13 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
 
       console.log(`[Uploader] Created new album: ${albumId}`);
 
-      // 8. Unlock locally (Add to Keyring)
-      unlockAlbum(albumId, masterKey);
-
-      // 9. Select the new album
       setSelectedAlbumId(albumId);
 
-      // 10. Reset inline form
       setShowCreateAlbum(false);
       setNewAlbumName('');
       setNewAlbumDescription('');
       setNewAlbumPrivacy('family');
 
-      // The albums list will update automatically via the subscription
     } catch (error: any) {
       console.error('[Uploader] Failed to create album:', error);
       setValidationError({
@@ -363,8 +289,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     }
   };
 
-
-
   const handleSave = async () => {
     if (filesToUpload.length === 0 || !analysis || !user || !onUploadComplete) return;
     if (!selectedAlbumId) {
@@ -376,10 +300,13 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       return;
     }
 
-    // 0. Ensure Encryption Context
-    const albumKey = getAlbumKey(selectedAlbumId);
-    if (!albumKey) {
-      setShowUnlockModal(true);
+    // Ensure Encryption Context
+    if (!familyKey) {
+      setValidationError({
+        title: t('error_family_locked'),
+        message: t('error_family_locked_msg', 'Family Vault is locked. Please unlock to upload.'),
+        suggestion: t('error_family_locked_sugg', 'Unlock Family Vault.')
+      });
       return;
     }
 
@@ -389,11 +316,10 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       const albumId = selectedAlbumId;
       console.log(`[Upload] Queueing ${filesToUpload.length} photos for background upload to album ${albumId}`);
 
-      // Queue uploads for background processing
       await addUploads(
         filesToUpload,
         albumId,
-        albumKey,
+        familyKey,
         {
           caption: analysis.caption,
           tags: analysis.tags
@@ -402,8 +328,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
       );
 
       console.log(`[Upload] ✅ All uploads queued successfully! Closing modal...`);
-
-      // Close modal immediately - uploads continue in background
       onCancel();
 
     } catch (error: any) {
@@ -436,7 +360,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         </div>
 
         <div className="p-8">
-          {/* Hidden file input that persists for "Add More" functionality */}
           <input
             type="file"
             ref={fileInputRef}
@@ -458,7 +381,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
               >
-                {/* File input removed - now using persistent input at top of component */}
                 <div className="w-20 h-20 bg-white shadow-sm rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
                   <Upload size={32} className="text-orange-400" />
                 </div>
@@ -467,7 +389,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                 <p className="text-stone-400 text-xs mt-4">{t('upload_formats', { max: MAX_IMAGES_PER_POST })}</p>
               </div>
 
-              {/* Validation Error Message */}
               {validationError && (
                 <div className="mt-6 p-6 bg-red-50 border border-red-200 rounded-2xl">
                   <div className="flex items-start gap-4">
@@ -491,7 +412,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
             </>
           ) : (
             <div className="space-y-6">
-              {/* Image Preview Grid */}
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-bold text-stone-400 uppercase tracking-wider">
@@ -528,7 +448,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                     </div>
                   ))}
 
-                  {/* Add more button if under limit */}
                   {filesToUpload.length < MAX_IMAGES_PER_POST && (
                     <div
                       onClick={() => fileInputRef.current?.click()}
@@ -624,7 +543,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                             </div>
                           </div>
 
-                          {/* Inline Album Creation Form */}
                           {showCreateAlbum && (
                             <div className="mt-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl space-y-3 animate-fade-in-up">
                               <h4 className="text-sm font-bold text-blue-900 flex items-center gap-2">
@@ -737,14 +655,6 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
           )}
         </div>
       </div>
-
-      <VaultUnlockModal
-        isOpen={showUnlockModal}
-        onClose={() => setShowUnlockModal(false)}
-        onUnlock={handleUnlock}
-        albumId={selectedAlbumId}
-        albumName={selectedAlbumName}
-      />
     </>
   );
 };

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Link as LinkIcon, Check, Copy, MessageCircle } from 'lucide-react';
 import { invitationService } from '../services/invitationService';
-import { getMasterKey } from '../lib/crypto/keyStore';
+import { getFamilyKey } from '../lib/crypto/keyStore';
 import { toBase64 } from '../lib/crypto/masterKey';
 
 interface InviteMemberModalProps {
@@ -23,23 +23,22 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
         setError('');
 
         try {
-            // 1. Get Master Key for this album
-            let keyBase64 = '';
-            if (albumId) {
-                const masterKey = await getMasterKey(albumId);
-                if (!masterKey) {
-                    throw new Error('Master key not available. Unlock album first.');
-                }
-                keyBase64 = toBase64(masterKey);
-            } else {
-                if (!albumId) throw new Error("Please select an album to invite to.");
+            // 1. Get Family Master Key
+            const familyKey = await getFamilyKey();
+            if (!familyKey) {
+                throw new Error("Family Master Key not found. Please log out and back in.");
             }
+            const keyBase64 = toBase64(familyKey);
+
+            if (!albumId) throw new Error("Please select an album to invite to.");
+
 
             // 2. Create Invite Record (No email needed)
             const token = await invitationService.createInvitation(currUserId, keyBase64, albumId);
 
             // 3. Construct Invite Link
             const baseUrl = window.location.origin;
+            // The key is in the Hash Fragment #key=...
             const link = `${baseUrl}/?invite=${token}#key=${keyBase64}`;
             setInviteLink(link);
 

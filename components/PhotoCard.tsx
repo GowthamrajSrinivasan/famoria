@@ -27,7 +27,7 @@ function isPost(item: Post | Photo): item is Post {
 
 export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUser, onDelete }) => {
   const { t } = useTranslation();
-  const { getAlbumKey } = useAuth();
+  const { familyKey } = useAuth();
 
   // State
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -64,9 +64,17 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
     }
 
     // Check if we have access to the album
-    const albumKey = getAlbumKey(photo.albumId);
+    // Check if we have the Family Master Key
+    // const { familyKey } = useAuth(); // REMOVED - Invalid Hook Call
+
+    // Legacy support: if family key missing, check for direct album key (migration phase)
+    // But primarily use familyKey.
+    const albumKey = familyKey;
+
     if (!albumKey) {
-      setIsLocked(true);
+      if (photo.isEncrypted) {
+        setIsLocked(true);
+      }
       return;
     }
 
@@ -155,7 +163,13 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
           // Filter out null results (failed decryptions)
           const validUrls = urls.filter((url): url is string => url !== null);
-          setDisplayUrls(validUrls);
+
+          if (validUrls.length === 0 && postPhotos.length > 0) {
+            console.warn('[PhotoCard] All photos failed to decrypt. Marking as locked.');
+            setIsLocked(true);
+          } else {
+            setDisplayUrls(validUrls);
+          }
 
           const overallEndTime = performance.now();
           const totalTime = overallEndTime - overallStartTime;
@@ -201,7 +215,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
     };
 
     decryptPhotos();
-  }, [photo.id, photo.isEncrypted, photo.albumId, getAlbumKey]);
+  }, [photo.id, photo.isEncrypted, photo.albumId, familyKey]);
 
   // Fetch album name
   useEffect(() => {

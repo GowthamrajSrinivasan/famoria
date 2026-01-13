@@ -82,6 +82,7 @@ export interface Comment {
 
 
 export enum ViewState {
+  DASHBOARD = 'DASHBOARD',
   GALLERY = 'GALLERY',
   UPLOAD = 'UPLOAD',
   VIDEO_UPLOAD = 'VIDEO_UPLOAD',

@@ -6,9 +6,8 @@ import { PhotoCard } from './PhotoCard';
 import { VideoCard } from './VideoCard';
 import { photoService } from '../services/photoService';
 import { videoService } from '../services/videoService';
-import { useAuth } from '../context/AuthContext';
+
 import { Button } from './Button';
-import { VaultUnlockModal } from './VaultUnlockModal';
 import { VideoLightbox } from './VideoLightbox';
 import { userService } from '../services/userService';
 
@@ -38,7 +37,8 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     onInvite
 }) => {
     const { t } = useTranslation();
-    const { getAlbumKey, unlockAlbum, autoUnlockAlbum } = useAuth();
+
+
     const [posts, setPosts] = useState<Post[]>([]);
     const [videos, setVideos] = useState<VideoType[]>([]);
     const [selectedVideo, setSelectedVideo] = useState<VideoType | null>(null);
@@ -47,9 +47,6 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     const [loading, setLoading] = useState(true);
     const [showMenu, setShowMenu] = useState(false);
     const [showUploadMenu, setShowUploadMenu] = useState(false);
-    const [showUnlock, setShowUnlock] = useState(false);
-    const [checkingVault, setCheckingVault] = useState(false);
-    const hasAttemptedUnlock = React.useRef(false);
 
     // Filter state
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -58,7 +55,6 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     const [showFilters, setShowFilters] = useState(false);
 
     const isOwner = currentUserId === album.createdBy;
-    const albumKey = getAlbumKey(album.id);
 
     // Subscribe to posts and videos in this album
     useEffect(() => {
@@ -118,20 +114,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
         };
     }, [album.id]);
 
-    // Auto-unlock on mount if locked
-    useEffect(() => {
-        if (!albumKey && !hasAttemptedUnlock.current && !checkingVault) {
-            hasAttemptedUnlock.current = true;
 
-            const attemptUnlock = async () => {
-                console.log(`[AlbumView] Attempting auto-unlock for album: ${album.id}`);
-                setCheckingVault(true);
-                const success = await autoUnlockAlbum(album.id);
-                setCheckingVault(false);
-            };
-            attemptUnlock();
-        }
-    }, [albumKey, album.id]);
 
     // Fetch users for filter
     useEffect(() => {
@@ -146,10 +129,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
         fetchUsers();
     }, []);
 
-    const handleUnlockSuccess = (key: Uint8Array) => {
-        unlockAlbum(album.id, key);
-        // Effect will trigger decryption
-    };
+
 
     const handleVideoClick = (video: VideoType) => {
         setSelectedVideo(video);
@@ -258,11 +238,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                                 </>
                             )}
 
-                            {!albumKey && (
-                                <span className="flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full text-xs font-bold">
-                                    <Lock size={12} /> {t('vault_locked')}
-                                </span>
-                            )}
+
                         </div>
                     </div>
 
@@ -562,26 +538,6 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                 <div className="flex items-center justify-center h-64">
                     <div className="w-12 h-12 border-4 border-stone-200 border-t-orange-500 rounded-full animate-spin" />
                 </div>
-            ) : !albumKey ? (
-                // Locked State (Check if we are auto-unlocking)
-                checkingVault ? (
-                    <div className="flex flex-col items-center justify-center h-64">
-                        <div className="w-12 h-12 border-4 border-stone-200 border-t-orange-500 rounded-full animate-spin mb-4" />
-                        <p className="text-stone-500 font-medium animate-pulse">{t('unlocking_vault')}</p>
-                    </div>
-                ) : (
-                    <div className="text-center py-20 bg-stone-50 rounded-3xl border-2 border-dashed border-stone-200">
-                        <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-6">
-                            <Lock size={40} className="text-stone-300" />
-                        </div>
-                        <h3 className="text-xl font-semibold text-stone-700 mb-2">{t('encypted_album')}</h3>
-                        <p className="text-stone-500 mb-8 max-w-sm mx-auto">{t('encrypted_album_desc')}</p>
-                        <Button onClick={() => setShowUnlock(true)} className="px-8 py-3">
-                            <KeyRound size={20} className="mr-2" />
-                            {t('unlock_gallery')}
-                        </Button>
-                    </div>
-                )
             ) : posts.length === 0 && videos.length === 0 ? (
                 <div className="text-center py-20">
                     <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
@@ -664,13 +620,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                 </div>
             )}
 
-            <VaultUnlockModal
-                isOpen={showUnlock}
-                onClose={() => setShowUnlock(false)}
-                onUnlock={handleUnlockSuccess}
-                albumId={album.id}
-                albumName={album.name}
-            />
+
 
             {/* Video Lightbox with Comments & Likes */}
             {selectedVideo && (

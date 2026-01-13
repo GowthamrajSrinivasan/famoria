@@ -1,4 +1,4 @@
-import { openDB, DBSchema } from 'idb';
+import { openDB, DBSchema, IDBPDatabase } from 'idb';
 
 interface FamoriaCryptoDB extends DBSchema {
     keys: {
@@ -10,6 +10,14 @@ interface FamoriaCryptoDB extends DBSchema {
             createdAt: number;
         };
         indexes: { 'by-date': number };
+    };
+    familyKeys: {
+        key: string; // 'FAMILY_MASTER_KEY'
+        value: {
+            id: string; // 'FAMILY_MASTER_KEY'
+            key: Uint8Array;
+            createdAt: number;
+        };
     };
     masterKeys: {
         key: string; // albumId
@@ -23,27 +31,40 @@ interface FamoriaCryptoDB extends DBSchema {
 }
 
 const DB_NAME = 'FamoriaCrypto';
-const DB_VERSION = 2; // Increment for schema change
+const DB_VERSION = 3; // Increment for schema change
 
 /**
  * Initializes the IndexedDB database for holding Hardware Bound Keys and MasterKeys.
  */
-async function getDB() {
-    return openDB<FamoriaCryptoDB>(DB_NAME, DB_VERSION, {
-        upgrade(db, oldVersion) {
-            // Create keys store if it doesn't exist
-            if (!db.objectStoreNames.contains('keys')) {
-                const store = db.createObjectStore('keys', { keyPath: 'albumId' });
-                store.createIndex('by-date', 'createdAt');
-            }
+let dbPromise: Promise<IDBPDatabase<FamoriaCryptoDB>>;
 
-            // Create masterKeys store for v2
-            if (oldVersion < 2 && !db.objectStoreNames.contains('masterKeys')) {
-                const masterStore = db.createObjectStore('masterKeys', { keyPath: 'albumId' });
-                masterStore.createIndex('by-date', 'createdAt');
-            }
-        },
-    });
+/**
+ * Initializes the IndexedDB database for holding Hardware Bound Keys and MasterKeys.
+ */
+function getDB() {
+    if (!dbPromise) {
+        dbPromise = openDB<FamoriaCryptoDB>(DB_NAME, DB_VERSION, {
+            upgrade(db, oldVersion) {
+                // Create keys store if it doesn't exist
+                if (!db.objectStoreNames.contains('keys')) {
+                    const store = db.createObjectStore('keys', { keyPath: 'albumId' });
+                    store.createIndex('by-date', 'createdAt');
+                }
+
+                // Create masterKeys store for v2
+                if (oldVersion < 2 && !db.objectStoreNames.contains('masterKeys')) {
+                    const masterStore = db.createObjectStore('masterKeys', { keyPath: 'albumId' });
+                    masterStore.createIndex('by-date', 'createdAt');
+                }
+
+                // Create familyKeys store for v3
+                if (oldVersion < 3 && !db.objectStoreNames.contains('familyKeys')) {
+                    db.createObjectStore('familyKeys', { keyPath: 'id' });
+                }
+            },
+        });
+    }
+    return dbPromise;
 }
 
 /**
@@ -84,6 +105,7 @@ export async function clearAllDeviceKeys() {
     const db = await getDB();
     await db.clear('keys');
     await db.clear('masterKeys'); // Also clear master keys
+    await db.clear('familyKeys'); // Clear family key
 }
 
 /**
@@ -116,4 +138,56 @@ export async function getMasterKey(albumId: string): Promise<Uint8Array | undefi
 export async function deleteMasterKey(albumId: string) {
     const db = await getDB();
     await db.delete('masterKeys', albumId);
+}
+
+// === FAMILY KEY FUNCTIONS ===
+
+const FAMILY_KEY_ID = 'FAMILY_MASTER_KEY';
+
+/**
+ * Saves the Family Master Key to IndexedDB.
+ */
+export async function saveFamilyKey(key: Uint8Array) {
+    try {
+        console.log('[KeyStore] Attempting to save Family Key to IDB...');
+        const db = await getDB();
+        await db.put('familyKeys', {
+            id: FAMILY_KEY_ID,
+            key,
+            createdAt: Date.now()
+        });
+        console.log('[KeyStore] Family Master Key SUCCESSFULLY saved to IDB');
+    } catch (e) {
+        console.error('[KeyStore] FAILED to save Family Key to IDB:', e);
+        throw e;
+    }
+}
+
+/**
+ * Retrieves the Family Master Key from IndexedDB.
+ */
+export async function getFamilyKey(): Promise<Uint8Array | undefined> {
+    try {
+        console.log('[KeyStore] Attempting to retrieve Family Key from IDB...');
+        const db = await getDB();
+        const record = await db.get('familyKeys', FAMILY_KEY_ID);
+        if (record) {
+            console.log('[KeyStore] Family Key FOUND in IDB');
+            return record.key;
+        } else {
+            console.log('[KeyStore] Family Key NOT FOUND in IDB');
+            return undefined;
+        }
+    } catch (e) {
+        console.error('[KeyStore] Error retrieving Family Key from IDB:', e);
+        return undefined;
+    }
+}
+
+/**
+ * Deletes the Family Master Key (e.g., on logout).
+ */
+export async function deleteFamilyKey() {
+    const db = await getDB();
+    await db.delete('familyKeys', FAMILY_KEY_ID);
 }

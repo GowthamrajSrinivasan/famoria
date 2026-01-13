@@ -22,18 +22,21 @@ import { VideoUploader } from './components/VideoUploader';
 import { userService } from './services/userService';
 import { subscribeToAlbums } from './services/albumService';
 import { invitationService } from './services/invitationService';
-import { saveMasterKey } from './lib/crypto/keyStore';
-import { fromBase64 } from './lib/crypto/masterKey';
+// import { saveMasterKey } from './lib/crypto/keyStore'; // Removed legacy
+import { familyService } from './services/familyService';
 import { InviteMemberModal } from './components/InviteMemberModal';
+import { FamilySetupModal } from './components/FamilySetupModal';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
+import { ImmersiveDashboard } from './components/ImmersiveDashboard';
 import { useTranslation } from 'react-i18next';
 
 function ProtectedApp() {
   const { t } = useTranslation();
   useAutoLock(); // Initialize auto-lock
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, signOut, isFamilyAuthenticated, googleAccessToken } = useAuth();
   const { toasts, addToast, removeToast } = useToast();
-  const [view, setView] = useState<ViewState>(ViewState.GALLERY);
+  // Default to Dashboard
+  const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   const [posts, setPosts] = useState<Post[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
@@ -99,14 +102,16 @@ function ProtectedApp() {
             addToast(t('toast_accepting_invite'), 'info');
             const invite = await invitationService.acceptInvitation(pendingToken, user.id);
 
-            // Save the Master Key
-            if (invite.albumId) {
-              const masterKey = fromBase64(pendingKey);
-              await saveMasterKey(invite.albumId, masterKey);
+
+            // Save the Family Key
+            if (pendingKey) {
+              await familyService.acceptFamilyInvite(pendingKey, googleAccessToken || undefined);
               addToast(t('toast_invite_accepted_unlocked'), 'success');
 
-              // Force refresh the albums list or similar if needed
-              // For now, the realtime listeners should pick it up
+              // If we were not authenticated before, reload to init context
+              if (!isFamilyAuthenticated) {
+                window.location.reload();
+              }
             } else {
               addToast(t('toast_invite_accepted'), 'success');
             }
@@ -132,7 +137,7 @@ function ProtectedApp() {
     };
 
     handleInviteLink();
-  }, [user, addToast]);
+  }, [user, addToast, googleAccessToken, isFamilyAuthenticated]);
 
   // Subscribe to real-time posts feed
   useEffect(() => {
@@ -283,6 +288,27 @@ function ProtectedApp() {
 
   if (!user) {
     return <Login />;
+  }
+
+  // If user is authenticated but Family Key is not set up/unlocked
+  if (user && !isFamilyAuthenticated) {
+    return <FamilySetupModal />;
+  }
+
+  if (view === ViewState.DASHBOARD) {
+    return (
+      <>
+        <ImmersiveDashboard
+          currentUser={user}
+          posts={posts}
+          onNavigate={setView}
+          onSignOut={signOut}
+          onAddNewMemory={() => setView(ViewState.UPLOAD)}
+        />
+        {/* Toast Notifications - Keep them global */}
+        <ToastNotification toasts={toasts} onRemove={removeToast} />
+      </>
+    );
   }
 
   return (

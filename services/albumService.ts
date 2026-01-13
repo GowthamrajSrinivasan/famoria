@@ -135,20 +135,8 @@ export const subscribeToAlbums = (
                 } as Album;
             });
 
-            // Auto-migrate albums without videoCount (one-time fix)
-            snapshot.docs.forEach(async (docSnapshot) => {
-                const data = docSnapshot.data();
-                if (data.videoCount === undefined) {
-                    console.log(`[AlbumService] Migrating album ${data.name} - adding videoCount`);
-                    try {
-                        await updateDoc(doc(db, ALBUMS_COLLECTION, docSnapshot.id), {
-                            videoCount: 0
-                        });
-                    } catch (error) {
-                        console.error(`[AlbumService] Failed to migrate album ${docSnapshot.id}:`, error);
-                    }
-                }
-            });
+            // Removed auto-migration to prevent permission errors on read-only access.
+            // videoCount defaults to 0 in the mapping above.
 
             onUpdate(albums);
         },
