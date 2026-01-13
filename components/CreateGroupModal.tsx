@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Users as UsersIcon, Check } from 'lucide-react';
 import { createGroup, updateGroup } from '../services/groupService';
 import { userService } from '../services/userService';
@@ -30,6 +31,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     currentUserId,
     editGroup
 }) => {
+    const { t } = useTranslation();
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
@@ -132,7 +134,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                             <UsersIcon size={24} className="text-orange-600" />
                         </div>
                         <h2 className="text-2xl font-bold text-stone-800">
-                            {editGroup ? 'Edit Group' : 'Create New Group'}
+                            {editGroup ? t('edit_group_modal_title') : t('create_group_modal_title')}
                         </h2>
                     </div>
                     <button
@@ -148,13 +150,13 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     {/* Group Name */}
                     <div className="mb-6">
                         <label className="block text-sm font-semibold text-stone-700 mb-2">
-                            Group Name *
+                            {t('group_name_label')}
                         </label>
                         <input
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="e.g., Close Family, Work Team, Friends"
+                            placeholder={t('group_name_placeholder')}
                             className="w-full px-4 py-3 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300"
                             maxLength={50}
                             required
@@ -165,12 +167,12 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     {/* Description */}
                     <div className="mb-6">
                         <label className="block text-sm font-semibold text-stone-700 mb-2">
-                            Description (Optional)
+                            {t('group_desc_label')}
                         </label>
                         <textarea
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
-                            placeholder="What's this group for?"
+                            placeholder={t('group_desc_placeholder')}
                             className="w-full px-4 py-3 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 resize-none"
                             rows={3}
                             maxLength={500}
@@ -181,7 +183,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     {/* Color Selection */}
                     <div className="mb-6">
                         <label className="block text-sm font-semibold text-stone-700 mb-3">
-                            Group Color
+                            {t('group_color_label')}
                         </label>
                         <div className="flex gap-3">
                             {GROUP_COLORS.map((color) => (
@@ -201,7 +203,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     {/* Icon Selection */}
                     <div className="mb-6">
                         <label className="block text-sm font-semibold text-stone-700 mb-3">
-                            Group Icon
+                            {t('group_icon_label')}
                         </label>
                         <div className="flex gap-2 flex-wrap">
                             {GROUP_ICONS.map((icon) => (
@@ -223,7 +225,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     {/* Members Selection */}
                     <div className="mb-6">
                         <label className="block text-sm font-semibold text-stone-700 mb-3">
-                            Add Members ({selectedMembers.length} selected)
+                            {t('add_members_label', { count: selectedMembers.length })}
                         </label>
                         {loadingUsers ? (
                             <div className="text-center py-6">
@@ -232,7 +234,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                         ) : (
                             <div className="border border-stone-200 rounded-xl max-h-64 overflow-y-auto">
                                 {allUsers.length === 0 ? (
-                                    <p className="text-center py-6 text-stone-400 text-sm">No other users found</p>
+                                    <p className="text-center py-6 text-stone-400 text-sm">{t('no_users_avail')}</p>
                                 ) : (
                                     allUsers.map((user) => (
                                         <label
@@ -274,7 +276,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                         onClick={onClose}
                         className="flex-1 px-6 py-3 bg-white border border-stone-200 text-stone-700 rounded-xl hover:bg-stone-100 transition-colors font-medium"
                     >
-                        Cancel
+                        {t('cancel')}
                     </button>
                     <button
                         onClick={handleSubmit}
@@ -284,9 +286,9 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                         {loading ? (
                             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto" />
                         ) : editGroup ? (
-                            'Update Group'
+                            t('update_group_btn')
                         ) : (
-                            'Create Group'
+                            t('create_group_btn')
                         )}
                     </button>
                 </div>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MoreVertical, Trash2, Edit, Image as ImageIcon, Calendar, Film } from 'lucide-react';
 import { Album } from '../types';
 
@@ -11,7 +12,8 @@ interface AlbumCardProps {
 }
 
 // Helper to format relative time
-const formatRelativeTime = (timestamp: number) => {
+const FormatRelativeTime = ({ timestamp }: { timestamp: number }) => {
+    const { t } = useTranslation();
     const now = Date.now();
     const diff = now - timestamp;
 
@@ -21,13 +23,13 @@ const formatRelativeTime = (timestamp: number) => {
     const weeks = Math.floor(diff / 604800000);
     const months = Math.floor(diff / 2629800000);
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-    if (weeks < 4) return `${weeks}w ago`;
-    if (months < 12) return `${months}mo ago`;
-    return new Date(timestamp).toLocaleDateString();
+    if (minutes < 1) return <>{t('time_just_now')}</>;
+    if (minutes < 60) return <>{t('time_m_ago', { count: minutes })}</>;
+    if (hours < 24) return <>{t('time_h_ago', { count: hours })}</>;
+    if (days < 7) return <>{t('time_d_ago', { count: days })}</>;
+    if (weeks < 4) return <>{t('time_w_ago', { count: weeks })}</>;
+    if (months < 12) return <>{t('time_mo_ago', { count: months })}</>;
+    return <>{new Date(timestamp).toLocaleDateString()}</>;
 };
 
 export const AlbumCard: React.FC<AlbumCardProps> = ({
@@ -38,6 +40,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
     onDelete
 }) => {
     const [showMenu, setShowMenu] = useState(false);
+    const { t } = useTranslation();
     const isOwner = currentUserId === album.createdBy;
 
     return (
@@ -77,7 +80,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                 {album.updatedAt && (
                     <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm text-stone-700 px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1">
                         <Calendar size={12} />
-                        <span>{formatRelativeTime(album.updatedAt)}</span>
+                        <span><FormatRelativeTime timestamp={album.updatedAt} /></span>
                     </div>
                 )}
             </div>
@@ -128,7 +131,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                                                 className="w-full px-4 py-3 text-left text-sm text-stone-700 hover:bg-stone-50 flex items-center gap-3 transition-colors"
                                             >
                                                 <Edit size={16} />
-                                                <span className="font-medium">Edit Album</span>
+                                                <span className="font-medium">{t('edit_album_action')}</span>
                                             </button>
                                         )}
                                         {onEdit && onDelete && (
@@ -144,7 +147,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                                                 className="w-full px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
                                             >
                                                 <Trash2 size={16} />
-                                                <span className="font-medium">Delete Album</span>
+                                                <span className="font-medium">{t('delete_album_action')}</span>
                                             </button>
                                         )}
                                     </div>
@@ -161,7 +164,7 @@ export const AlbumCard: React.FC<AlbumCardProps> = ({
                     </span>
                     {album.members.length > 1 && (
                         <span className="text-xs text-stone-400">
-                            {album.members.length} members
+                            {album.members.length} {t('members_count_suffix')}
                         </span>
                     )}
                 </div>

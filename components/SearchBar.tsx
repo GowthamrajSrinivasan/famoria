@@ -1,5 +1,6 @@
 import React from 'react';
 import { Search, SlidersHorizontal } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface SearchBarProps {
     searchQuery: string;
@@ -14,30 +15,32 @@ export const SearchBar: React.FC<SearchBarProps> = ({
     onSearchChange,
     onFilterClick,
     activeFilterCount,
-    placeholder = 'Search...'
+    placeholder
 }) => {
+    const { t } = useTranslation();
+    const finalPlaceholder = placeholder || t('search_default_placeholder');
+
     return (
         <div className="relative flex items-center">
             {/* Search Icon */}
             <Search size={20} className="absolute left-4 text-stone-400 pointer-events-none" />
 
             {/* Search Input */}
-            <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => onSearchChange(e.target.value)}
-                placeholder={placeholder}
-                className="w-full pl-12 pr-14 py-3 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all"
+            type="text"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder={finalPlaceholder}
+            className="w-full pl-12 pr-14 py-3 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all"
             />
 
             {/* Filter Button */}
             <button
                 onClick={onFilterClick}
                 className={`absolute right-2 p-2 rounded-lg transition-all ${activeFilterCount > 0
-                        ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
-                        : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600'
+                    ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
+                    : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600'
                     }`}
-                title="Open filters"
+                title={t('open_filters')}
             >
                 <SlidersHorizontal size={20} />
                 {activeFilterCount > 0 && (

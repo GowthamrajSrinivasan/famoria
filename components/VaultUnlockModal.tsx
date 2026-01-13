@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Lock, X, Loader2, KeyRound, AlertTriangle } from 'lucide-react';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
@@ -30,6 +31,7 @@ export const VaultUnlockModal: React.FC<VaultUnlockModalProps> = ({
     albumId,
     albumName
 }) => {
+    const { t } = useTranslation();
     const { googleAccessToken, refreshDriveToken } = useAuth();
     const [recoveryKeyInput, setRecoveryKeyInput] = useState('');
     const [isUnlocking, setIsUnlocking] = useState(false);
@@ -116,7 +118,7 @@ export const VaultUnlockModal: React.FC<VaultUnlockModalProps> = ({
                 <div className="flex items-center justify-between p-4 border-b border-stone-100 bg-stone-50">
                     <h2 className="text-lg font-bold text-stone-800 flex items-center gap-2">
                         <Lock size={18} className="text-stone-500" />
-                        Unlock {albumName || 'Album'}
+                        {t('unlock_title', { album: albumName || 'Album' })}
                     </h2>
                     <button onClick={onClose} className="p-2 hover:bg-stone-200 rounded-full transition-colors">
                         <X size={18} className="text-stone-500" />
@@ -128,10 +130,8 @@ export const VaultUnlockModal: React.FC<VaultUnlockModalProps> = ({
                         <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-3">
                             <KeyRound className="text-red-500" size={28} />
                         </div>
-                        <h3 className="font-semibold text-stone-800">New Device Detected</h3>
-                        <p className="text-stone-500 text-sm mt-1">
-                            Use your <strong>Recovery Key</strong> to authorize this device.
-                        </p>
+                        <h3 className="font-semibold text-stone-800">{t('new_device_detected')}</h3>
+                        <p className="text-stone-500 text-sm mt-1" dangerouslySetInnerHTML={{ __html: t('new_device_desc') }}></p>
                     </div>
 
                     <form onSubmit={handleRecovery} className="space-y-4">
@@ -139,7 +139,7 @@ export const VaultUnlockModal: React.FC<VaultUnlockModalProps> = ({
                             <textarea
                                 value={recoveryKeyInput}
                                 onChange={(e) => setRecoveryKeyInput(e.target.value)}
-                                placeholder="Paste your Recovery Key here..."
+                                placeholder={t('paste_recovery_key')}
                                 className="w-full h-24 p-3 text-sm font-mono border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-200 outline-none resize-none bg-stone-50"
                             />
                         </div>
@@ -156,13 +156,13 @@ export const VaultUnlockModal: React.FC<VaultUnlockModalProps> = ({
                             disabled={isUnlocking || !recoveryKeyInput.trim()}
                             isLoading={isUnlocking}
                         >
-                            Authorize Device & Unlock
+                            {t('authorize_unlock_btn')}
                         </Button>
                     </form>
 
                     <div className="mt-4 pt-4 border-t border-stone-100 text-center">
                         <p className="text-xs text-stone-400">
-                            Don't have your key? Ask the album owner to re-invite you.
+                            {t('no_key_help')}
                         </p>
                     </div>
                 </div>

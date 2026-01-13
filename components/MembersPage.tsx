@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Users, Mail, Calendar, Shield, ArrowLeft, Plus, Edit, Trash2 } from 'lucide-react';
 import { User, Group } from '../types';
 import { userService } from '../services/userService';
@@ -11,6 +12,7 @@ interface MembersPageProps {
 }
 
 export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId }) => {
+    const { t } = useTranslation();
     const [activeTab, setActiveTab] = useState<'members' | 'groups'>('members');
     const [members, setMembers] = useState<User[]>([]);
     const [groups, setGroups] = useState<Group[]>([]);
@@ -36,7 +38,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                     // Suppress permission errors (normal when not logged in)
                     if (!error.message?.includes('permission')) {
                         console.warn('Error loading groups:', error);
-                        setError('Failed to load groups');
+                        setError(t('error_loading_groups'));
                     }
                     setLoading(false);
                 }
@@ -53,7 +55,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
             setMembers(users);
         } catch (err) {
             console.error('Error loading members:', err);
-            setError('Failed to load members. Please try again.');
+            setError(t('error_loading_members'));
         } finally {
             setLoading(false);
         }
@@ -108,7 +110,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                     className="group flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-800 transition-colors mb-6"
                 >
                     <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-                    Back
+                    {t('back')}
                 </button>
 
                 <div className="flex items-center justify-between">
@@ -118,12 +120,12 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                         </div>
                         <div>
                             <h1 className="text-3xl font-bold text-stone-800">
-                                {activeTab === 'members' ? 'Family Members' : 'Groups'}
+                                {activeTab === 'members' ? t('title_family_members') : t('title_groups')}
                             </h1>
                             <p className="text-stone-500 mt-1">
                                 {activeTab === 'members'
-                                    ? `${members.length} ${members.length === 1 ? 'member' : 'members'} in your family app`
-                                    : `${groups.length} ${groups.length === 1 ? 'group' : 'groups'} created`}
+                                    ? t('members_count_subtitle', { count: members.length })
+                                    : t('groups_count_subtitle', { count: groups.length })}
                             </p>
                         </div>
                     </div>
@@ -137,7 +139,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                             className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 flex items-center gap-2 font-medium"
                         >
                             <Plus size={20} />
-                            Create Group
+                            {t('create_group')}
                         </button>
                     )}
                 </div>
@@ -152,7 +154,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                         : 'text-stone-500 hover:text-stone-700'
                         }`}
                 >
-                    Members
+                    {t('tab_members')}
                 </button>
                 <button
                     onClick={() => setActiveTab('groups')}
@@ -161,7 +163,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                         : 'text-stone-500 hover:text-stone-700'
                         }`}
                 >
-                    Groups
+                    {t('tab_groups')}
                 </button>
             </div>
 
@@ -173,7 +175,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                         onClick={loadMembers}
                         className="mt-2 text-sm font-medium text-red-600 hover:text-red-700 underline"
                     >
-                        Try again
+                        {t('try_again')}
                     </button>
                 </div>
             )}
@@ -186,8 +188,8 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                             <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
                                 <Users size={40} className="text-stone-300" />
                             </div>
-                            <h3 className="text-xl font-semibold text-stone-700 mb-2">No members found</h3>
-                            <p className="text-stone-500">There are no registered members in your app yet.</p>
+                            <h3 className="text-xl font-semibold text-stone-700 mb-2">{t('no_members_found')}</h3>
+                            <p className="text-stone-500">{t('no_members_desc')}</p>
                         </div>
                     ) : (
                         <>
@@ -232,20 +234,20 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                                             {member.createdAt && (
                                                 <div className="flex items-center gap-2 text-sm text-stone-600">
                                                     <Calendar size={16} className="text-stone-400" />
-                                                    <span>Joined {formatDate(member.createdAt)}</span>
+                                                    <span>{t('joined_date', { date: formatDate(member.createdAt) })}</span>
                                                 </div>
                                             )}
 
                                             {member.lastLogin && (
                                                 <div className="text-xs text-stone-500 pt-2 border-t border-stone-100">
-                                                    Last active: {formatDate(member.lastLogin)}
+                                                    {t('last_active', { date: formatDate(member.lastLogin) })}
                                                 </div>
                                             )}
                                         </div>
 
                                         <div className="mt-4 pt-4 border-t border-stone-100">
                                             <p className="text-xs font-mono text-stone-400 truncate">
-                                                ID: {member.id}
+                                                {t('member_id', { id: member.id })}
                                             </p>
                                         </div>
                                     </div>
@@ -254,29 +256,29 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
 
                             {members.length > 0 && (
                                 <div className="mt-8 bg-white rounded-2xl border border-stone-100 p-6">
-                                    <h3 className="text-lg font-bold text-stone-800 mb-4">Summary</h3>
+                                    <h3 className="text-lg font-bold text-stone-800 mb-4">{t('summary')}</h3>
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                         <div className="text-center">
                                             <p className="text-2xl font-bold text-orange-500">{members.length}</p>
-                                            <p className="text-sm text-stone-500 mt-1">Total Members</p>
+                                            <p className="text-sm text-stone-500 mt-1">{t('total_members')}</p>
                                         </div>
                                         <div className="text-center">
                                             <p className="text-2xl font-bold text-purple-500">
                                                 {members.filter(m => m.plan === 'Ultimate').length}
                                             </p>
-                                            <p className="text-sm text-stone-500 mt-1">Ultimate</p>
+                                            <p className="text-sm text-stone-500 mt-1">{t('plan_ultimate')}</p>
                                         </div>
                                         <div className="text-center">
                                             <p className="text-2xl font-bold text-orange-500">
                                                 {members.filter(m => m.plan === 'Pro').length}
                                             </p>
-                                            <p className="text-sm text-stone-500 mt-1">Pro</p>
+                                            <p className="text-sm text-stone-500 mt-1">{t('plan_pro')}</p>
                                         </div>
                                         <div className="text-center">
                                             <p className="text-2xl font-bold text-stone-500">
                                                 {members.filter(m => m.plan === 'Lite' || !m.plan).length}
                                             </p>
-                                            <p className="text-sm text-stone-500 mt-1">Lite/Free</p>
+                                            <p className="text-sm text-stone-500 mt-1">{t('plan_lite_free')}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -294,14 +296,14 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                             <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
                                 <Users size={40} className="text-stone-300" />
                             </div>
-                            <h3 className="text-xl font-semibold text-stone-700 mb-2">No groups yet</h3>
-                            <p className="text-stone-500 mb-6">Create your first group to organize your family members</p>
+                            <h3 className="text-xl font-semibold text-stone-700 mb-2">{t('no_groups_yet')}</h3>
+                            <p className="text-stone-500 mb-6">{t('create_first_group_desc')}</p>
                             <button
                                 onClick={() => setShowCreateGroupModal(true)}
                                 className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all inline-flex items-center gap-2 font-medium"
                             >
                                 <Plus size={20} />
-                                Create First Group
+                                {t('create_first_group')}
                             </button>
                         </div>
                     ) : (
@@ -333,7 +335,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                                     {/* Members */}
                                     <div className="mb-4">
                                         <p className="text-xs font-semibold text-stone-400 uppercase mb-2">
-                                            {group.members.length} Members
+                                            {t('members_count', { count: group.members.length })}
                                         </p>
                                         <div className="flex -space-x-2">
                                             {groupMembers.slice(0, 5).map((member) => (
@@ -363,13 +365,13 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                                                 }}
                                                 className="flex-1 px-3 py-2 bg-stone-100 text-stone-700 rounded-lg hover:bg-stone-200 transition-colors text-sm font-medium flex items-center justify-center gap-1"
                                             >
-                                                <Edit size={14} /> Edit
+                                                <Edit size={14} /> {t('edit')}
                                             </button>
                                             <button
                                                 onClick={() => setDeleteConfirm(group.id)}
                                                 className="flex-1 px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium flex items-center justify-center gap-1"
                                             >
-                                                <Trash2 size={14} /> Delete
+                                                <Trash2 size={14} /> {t('delete')}
                                             </button>
                                         </div>
                                     )}
@@ -401,22 +403,22 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
             {deleteConfirm && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in-up">
-                        <h3 className="text-xl font-bold text-stone-800 mb-2">Delete Group?</h3>
+                        <h3 className="text-xl font-bold text-stone-800 mb-2">{t('delete_group_title')}</h3>
                         <p className="text-stone-600 mb-6">
-                            This will permanently delete this group. Members will not be affected.
+                            {t('delete_group_message')}
                         </p>
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setDeleteConfirm(null)}
                                 className="flex-1 px-4 py-3 bg-stone-100 text-stone-700 rounded-xl hover:bg-stone-200 transition-colors font-medium"
                             >
-                                Cancel
+                                {t('cancel')}
                             </button>
                             <button
                                 onClick={() => handleDeleteGroup(deleteConfirm)}
                                 className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium"
                             >
-                                Delete
+                                {t('delete')}
                             </button>
                         </div>
                     </div>

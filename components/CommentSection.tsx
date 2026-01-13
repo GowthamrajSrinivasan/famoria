@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Send, Trash2, Edit2, Heart } from 'lucide-react';
 import { useComments, formatRelativeTime } from '../hooks/useInteractions';
 import { User } from '../types';
@@ -13,6 +14,7 @@ interface CommentSectionProps {
 }
 
 export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId, itemType = 'photo', currentUser, photoLikes }) => {
+  const { t } = useTranslation();
   const actualItemId = itemId || photoId || '';
   // Map itemType to collection name: 'photo' -> 'photos', 'post' -> 'posts', 'video' -> 'videos'
   const collectionName = itemType === 'video' ? 'videos' : itemType === 'post' ? 'posts' : 'photos';
@@ -118,7 +120,7 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId,
           </div>
         ) : comments.length === 0 ? (
           <div className="text-center py-10 text-stone-400">
-            <p className="text-sm">No comments yet. Be the first!</p>
+            <p className="text-sm">{t('no_comments_yet')}</p>
           </div>
         ) : (
           comments.map((comment) => {
@@ -138,7 +140,7 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId,
                       <span className="font-semibold text-sm text-stone-800">{comment.userName}</span>
                       <span className="text-[10px] text-stone-400">
                         {formatRelativeTime(comment.createdAt)}
-                        {comment.updatedAt && ' (edited)'}
+                        {comment.updatedAt && ` ${t('edited_suffix')}`}
                       </span>
                     </div>
                     {editingCommentId === comment.id ? (
@@ -155,13 +157,13 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId,
                             onClick={() => handleSaveEdit(comment.id)}
                             className="text-[11px] font-medium text-orange-500 hover:text-orange-600 px-2 py-1 rounded"
                           >
-                            Save
+                            {t('save_btn')}
                           </button>
                           <button
                             onClick={handleCancelEdit}
                             className="text-[11px] font-medium text-stone-400 hover:text-stone-600 px-2 py-1 rounded"
                           >
-                            Cancel
+                            {t('cancel_btn')}
                           </button>
                         </div>
                       </div>
@@ -194,7 +196,7 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId,
                         onClick={() => handleReply(comment.id, comment.userName)}
                         className="text-sm font-semibold text-stone-500 hover:text-stone-700"
                       >
-                        Reply
+                        {t('reply_btn')}
                       </button>
                       {currentUser?.id === comment.userId && (
                         <>
@@ -203,13 +205,13 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId,
                             className="text-sm font-semibold text-stone-500 hover:text-stone-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1"
                           >
                             <Edit2 size={14} className="inline" />
-                            Edit
+                            {t('edit_btn')}
                           </button>
                           <button
                             onClick={() => deleteComment(comment.id)}
                             className="text-sm font-semibold text-red-400 hover:text-red-600 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                           >
-                            <Trash2 size={14} /> Delete
+                            <Trash2 size={14} /> {t('delete_btn')}
                           </button>
                         </>
                       )}
@@ -229,7 +231,7 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId,
           <>
             {replyToId && (
               <div className="mb-2 flex items-center justify-between text-xs text-stone-500 bg-orange-50 px-3 py-2 rounded-lg">
-                <span>Replying to <strong>{replyToName}</strong></span>
+                <span>{t('replying_to')} <strong>{replyToName}</strong></span>
                 <button
                   onClick={() => { setReplyToId(null); setReplyToName(''); }}
                   className="text-stone-400 hover:text-stone-600 font-bold"
@@ -250,7 +252,7 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId,
                         setNewComment(e.target.value);
                       }
                     }}
-                    placeholder="Add a comment..."
+                    placeholder={t('add_comment_placeholder')}
                     className={`w-full bg-stone-50 border rounded-2xl pl-4 pr-12 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-100 transition-all resize-none custom-scrollbar ${newComment.length >= MAX_CHARS
                       ? 'border-red-300 focus:border-red-300 focus:ring-red-100'
                       : 'border-stone-200 focus:border-orange-300'
@@ -294,7 +296,7 @@ export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId,
           </>
         ) : (
           <p className="text-center text-sm text-stone-400">
-            Please sign in to comment
+            {t('sign_in_to_comment')}
           </p>
         )}
       </div>

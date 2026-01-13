@@ -25,8 +25,11 @@ import { invitationService } from './services/invitationService';
 import { saveMasterKey } from './lib/crypto/keyStore';
 import { fromBase64 } from './lib/crypto/masterKey';
 import { InviteMemberModal } from './components/InviteMemberModal';
+import { LanguageSwitcher } from './components/LanguageSwitcher';
+import { useTranslation } from 'react-i18next';
 
 function ProtectedApp() {
+  const { t } = useTranslation();
   useAutoLock(); // Initialize auto-lock
   const { user, loading, signOut } = useAuth();
   const { toasts, addToast, removeToast } = useToast();
@@ -76,7 +79,7 @@ function ProtectedApp() {
         // If user is not logged in, show toast once
         if (!user) {
           isProcessingInvite.current = true;
-          addToast('Please sign in or create an account to accept the invitation.', 'info');
+          addToast(t('toast_signin_invite'), 'info');
           // Reset after a delay to allow for future attempts if needed, 
           // though usually this is a one-off per page load
           setTimeout(() => { isProcessingInvite.current = false; }, 2000);
@@ -93,19 +96,19 @@ function ProtectedApp() {
           isProcessingInvite.current = true;
 
           try {
-            addToast('Accepting invitation...', 'info');
+            addToast(t('toast_accepting_invite'), 'info');
             const invite = await invitationService.acceptInvitation(pendingToken, user.id);
 
             // Save the Master Key
             if (invite.albumId) {
               const masterKey = fromBase64(pendingKey);
               await saveMasterKey(invite.albumId, masterKey);
-              addToast('Invitation accepted and album unlocked!', 'success');
+              addToast(t('toast_invite_accepted_unlocked'), 'success');
 
               // Force refresh the albums list or similar if needed
               // For now, the realtime listeners should pick it up
             } else {
-              addToast('Invitation accepted!', 'success');
+              addToast(t('toast_invite_accepted'), 'success');
             }
 
             sessionStorage.removeItem('pendingInviteToken');
@@ -114,7 +117,7 @@ function ProtectedApp() {
           } catch (error) {
             console.error('Failed to accept invitation:', error);
             // Only show error if it's not "already accepted" or similar harmless error
-            addToast('Failed to accept invitation. It may be expired.', 'error');
+            addToast(t('toast_invite_failed'), 'error');
 
             // Critical: Remove tokens to prevent infinite retry loop
             sessionStorage.removeItem('pendingInviteToken');
@@ -303,7 +306,7 @@ function ProtectedApp() {
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400 group-focus-within:text-orange-500 transition-colors" size={18} />
                 <input
                   type="text"
-                  placeholder="Search memories..."
+                  placeholder={t('search_placeholder')}
                   className="w-full pl-11 pr-4 py-2.5 bg-stone-100/50 border border-transparent rounded-full text-sm focus:ring-2 focus:ring-orange-100 focus:bg-white focus:border-orange-200 transition-all placeholder:text-stone-400 outline-none"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -323,7 +326,7 @@ function ProtectedApp() {
                   }`}
               >
                 <Grid size={16} className="inline mr-1.5" />
-                Gallery
+                {t('nav_gallery')}
               </button>
               <button
                 onClick={() => setView(ViewState.ALBUMS)}
@@ -333,7 +336,7 @@ function ProtectedApp() {
                   }`}
               >
                 <FolderOpen size={16} className="inline mr-1.5" />
-                Albums
+                {t('nav_albums')}
               </button>
               <button
                 onClick={() => setView(ViewState.VIDEOS)}
@@ -343,7 +346,7 @@ function ProtectedApp() {
                   }`}
               >
                 <Film size={16} className="inline mr-1.5" />
-                Videos
+                {t('nav_videos')}
               </button>
               <button
                 onClick={() => setView(ViewState.MEMBERS)}
@@ -353,11 +356,12 @@ function ProtectedApp() {
                   }`}
               >
                 <Users size={16} className="inline mr-1.5" />
-                Members
+                {t('nav_members')}
               </button>
             </div>
 
             <div className="flex items-center gap-3 pl-6">
+              <LanguageSwitcher />
               {/* Notification Bell */}
               <NotificationBell
                 userId={user.id}
@@ -366,7 +370,7 @@ function ProtectedApp() {
 
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-semibold text-stone-800 leading-none">{user.name}</p>
-                <p className="text-[11px] font-medium text-stone-400 mt-1 uppercase tracking-wide">Family Member</p>
+                <p className="text-[11px] font-medium text-stone-400 mt-1 uppercase tracking-wide">{t('role_family_member')}</p>
               </div>
               <div className="relative">
                 <img
@@ -379,7 +383,7 @@ function ProtectedApp() {
               <button
                 onClick={signOut}
                 className="p-2.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-full transition-all"
-                title="Sign Out"
+                title={t('sign_out')}
               >
                 <LogOut size={20} strokeWidth={1.5} />
               </button>
@@ -395,9 +399,9 @@ function ProtectedApp() {
             <div className="flex flex-col gap-6 mb-10">
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div>
-                  <h1 className="text-3xl font-bold text-stone-800 mb-2 font-serif">Family Feed</h1>
+                  <h1 className="text-3xl font-bold text-stone-800 mb-2 font-serif">{t('family_feed')}</h1>
                   <p className="text-stone-500">
-                    You have <span className="font-semibold text-stone-800">{posts.length}</span> shared moments
+                    <span dangerouslySetInnerHTML={{ __html: t('shared_moments_count', { count: posts.length }) }}></span>
                   </p>
                 </div>
                 <Button
@@ -405,23 +409,23 @@ function ProtectedApp() {
                   className="shadow-xl shadow-orange-500/20 hover:shadow-orange-500/30 transition-all active:scale-95"
                 >
                   <Plus size={20} className="mr-2" strokeWidth={2.5} />
-                  Add New Memory
+                  {t('add_memory')}
                 </Button>
               </div>
 
               {/* Sort Dropdown */}
               <div className="flex items-center gap-3">
                 <ArrowUpDown size={18} className="text-stone-400" />
-                <span className="text-sm font-medium text-stone-600">Sort by:</span>
+                <span className="text-sm font-medium text-stone-600">{t('sort_by')}</span>
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as any)}
                   className="px-4 py-2 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
                 >
-                  <option value="newest">Newest First</option>
-                  <option value="oldest">Oldest First</option>
-                  <option value="liked">Most Liked</option>
-                  <option value="commented">Most Commented</option>
+                  <option value="newest">{t('sort_newest')}</option>
+                  <option value="oldest">{t('sort_oldest')}</option>
+                  <option value="liked">{t('sort_liked')}</option>
+                  <option value="commented">{t('sort_commented')}</option>
                 </select>
               </div>
 
@@ -435,7 +439,7 @@ function ProtectedApp() {
                     }`}
                 >
                   <Filter size={16} />
-                  <span>Filters</span>
+                  <span>{t('filters')}</span>
                   {activeFilterCount > 0 && (
                     <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                       {activeFilterCount}
@@ -447,7 +451,7 @@ function ProtectedApp() {
                     onClick={clearFilters}
                     className="text-sm text-stone-500 hover:text-stone-700 font-medium"
                   >
-                    Clear all
+                    {t('clear_all')}
                   </button>
                 )}
               </div>
@@ -456,7 +460,7 @@ function ProtectedApp() {
             {/* Active Filter Chips */}
             {activeFilterCount > 0 && (
               <div className="flex flex-wrap gap-2 items-center animate-in fade-in slide-in-from-top-2 duration-200">
-                <span className="text-sm font-medium text-stone-600">Active filters:</span>
+                <span className="text-sm font-medium text-stone-600">{t('active_filters')}</span>
                 {selectedTags.map(tag => {
                   const user = availableUsers.find(u => u.id === tag);
                   const displayName = user?.name || tag;
@@ -510,11 +514,11 @@ function ProtectedApp() {
                   {/* Tags Filter */}
                   <div>
                     <label className="block text-sm font-semibold text-stone-800 mb-3">
-                      Tagged People
+                      {t('filter_tagged_people')}
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {uniqueTags.length === 0 ? (
-                        <p className="text-sm text-stone-400">No tags available</p>
+                        <p className="text-sm text-stone-400">{t('no_tags')}</p>
                       ) : (
                         uniqueTags.map(tag => {
                           const user = availableUsers.find(u => u.id === tag);
@@ -546,7 +550,7 @@ function ProtectedApp() {
                   {/* Uploader Filter */}
                   <div>
                     <label className="block text-sm font-semibold text-stone-800 mb-3">
-                      Uploaded By
+                      {t('filter_uploaded_by')}
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {availableUsers.map(user => {
@@ -576,11 +580,11 @@ function ProtectedApp() {
                   {/* Albums Filter */}
                   <div>
                     <label className="block text-sm font-semibold text-stone-800 mb-3">
-                      Albums
+                      {t('filter_albums')}
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {availableAlbums.length === 0 ? (
-                        <p className="text-sm text-stone-400">No albums available</p>
+                        <p className="text-sm text-stone-400">{t('no_albums')}</p>
                       ) : (
                         availableAlbums.map(album => {
                           const isSelected = selectedAlbums.includes(album.id);
@@ -615,8 +619,8 @@ function ProtectedApp() {
                 <div className="w-16 h-16 bg-stone-50 rounded-full flex items-center justify-center mb-4 text-stone-300">
                   <ImageIcon size={32} />
                 </div>
-                <h3 className="text-lg font-semibold text-stone-700 mb-1">No memories found</h3>
-                <p className="text-stone-400 max-w-xs mx-auto">Try a different search term or add a new photo to your collection.</p>
+                <h3 className="text-lg font-semibold text-stone-700 mb-1">{t('no_memories_found')}</h3>
+                <p className="text-stone-400 max-w-xs mx-auto">{t('no_memories_hint')}</p>
               </div>
             ) : (
               <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
@@ -639,7 +643,7 @@ function ProtectedApp() {
               className="group flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-800 transition-colors mb-6 pl-1"
               onClick={() => setView(ViewState.GALLERY)}
             >
-              <span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Back to Gallery
+              <span className="group-hover:-translate-x-1 transition-transform">&larr;</span> {t('back_to_gallery')}
             </button>
             <Uploader
               onUploadComplete={handleUploadComplete}
@@ -700,7 +704,7 @@ function ProtectedApp() {
               className="group flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-800 transition-colors mb-6 pl-1"
               onClick={() => setView(ViewState.ALBUM_VIEW)}
             >
-              <span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Back to Album
+              <span className="group-hover:-translate-x-1 transition-transform">&larr;</span> {t('back_to_album')}
             </button>
             <VideoUploader
               currentUser={user!}

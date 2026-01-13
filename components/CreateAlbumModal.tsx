@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Image as ImageIcon, Lock, Users, Globe, Key, AlertTriangle, Download, Check, Loader2, Upload } from 'lucide-react';
 import { Album, Group, User } from '../types';
 import { createAlbum, updateAlbum } from '../services/albumService';
@@ -30,6 +31,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
     currentUserId,
     editAlbum
 }) => {
+    const { t } = useTranslation();
     const { googleAccessToken, refreshDriveToken, unlockAlbum } = useAuth();
     const [step, setStep] = useState<Step>('DETAILS');
 
@@ -127,7 +129,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
 
     const handleDetailsSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name.trim()) return setError('Album name is required');
+        if (!name.trim()) return setError(t('error_album_name_req'));
 
         if (editAlbum) {
             // Editing doesn't change encryption keys for now
@@ -347,7 +349,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
 
     const handleFinish = () => {
         if (!hasDownloaded) {
-            setError("You must download the Recovery Kit to continue.");
+            setError(t('download_required_error'));
             return;
         }
         onSuccess(name);
@@ -362,8 +364,8 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-stone-100 bg-stone-50 flex-shrink-0">
                     <h2 className="text-xl font-bold text-stone-800 flex items-center gap-2">
-                        {step === 'DETAILS' ? (editAlbum ? 'Edit Album' : 'Create New Album') :
-                            step === 'PROCESSING' ? 'Securing Vault...' : 'Emergency Backup'}
+                        {step === 'DETAILS' ? (editAlbum ? t('edit_album_modal_title') : t('create_album_modal_title')) :
+                            step === 'PROCESSING' ? t('securing_vault') : t('emergency_backup')}
                     </h2>
                     {step !== 'RECOVERY' && (
                         <button onClick={onClose} className="p-2 hover:bg-stone-200 rounded-full transition-colors">
@@ -377,12 +379,12 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     {step === 'DETAILS' && (
                         <form onSubmit={handleDetailsSubmit} className="space-y-5">
                             <div>
-                                <label className="block text-sm font-semibold text-stone-700 mb-2">Album Name</label>
+                                <label className="block text-sm font-semibold text-stone-700 mb-2">{t('album_name_label')}</label>
                                 <input
                                     type="text"
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
-                                    placeholder="e.g., Summer Vacation"
+                                    placeholder={t('album_name_placeholder')}
                                     className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-200 outline-none transition-all"
                                     autoFocus
                                 />
@@ -390,7 +392,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
 
                             {/* Cover Image Upload */}
                             <div>
-                                <label className="block text-sm font-semibold text-stone-700 mb-2">Cover Image (Optional)</label>
+                                <label className="block text-sm font-semibold text-stone-700 mb-2">{t('cover_image_label')}</label>
                                 <div className="space-y-3">
                                     {coverPreview && (
                                         <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-stone-100">
@@ -414,9 +416,9 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                     <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-stone-200 rounded-xl hover:border-orange-300 hover:bg-orange-50/50 transition-all cursor-pointer">
                                         <Upload size={24} className="text-stone-400 mb-2" />
                                         <span className="text-sm text-stone-500">
-                                            {coverPreview ? 'Change cover image' : 'Upload cover image'}
+                                            {coverPreview ? t('change_cover') : t('upload_cover')}
                                         </span>
-                                        <span className="text-xs text-stone-400 mt-1">JPG, PNG up to 5MB</span>
+                                        <span className="text-xs text-stone-400 mt-1">{t('cover_formats')}</span>
                                         <input
                                             type="file"
                                             accept="image/*"
@@ -429,7 +431,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
 
                             {/* Access Permission Section */}
                             <div>
-                                <label className="block text-sm font-semibold text-stone-700 mb-3">Access Permission</label>
+                                <label className="block text-sm font-semibold text-stone-700 mb-3">{t('access_permission_label')}</label>
 
                                 {/* Groups/Members Tabs */}
                                 <div className="flex gap-2 mb-4 bg-stone-100 p-1 rounded-lg">
@@ -441,7 +443,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                             : 'text-stone-500 hover:text-stone-700'
                                             }`}
                                     >
-                                        Groups
+                                        {t('tab_groups')}
                                     </button>
                                     <button
                                         type="button"
@@ -451,7 +453,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                             : 'text-stone-500 hover:text-stone-700'
                                             }`}
                                     >
-                                        Members
+                                        {t('tab_members')}
                                     </button>
                                 </div>
 
@@ -459,20 +461,17 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                 {accessTab === 'groups' && (
                                     <div className="bg-stone-50 rounded-lg p-4 max-h-64 overflow-y-auto">
                                         <p className="text-xs text-stone-500 mb-3">
-                                            Select groups ({selectedGroups.length} selected)
+                                            {t('select_groups_count', { count: selectedGroups.length })}
                                         </p>
-                                        {/* DEBUG INFO - REMOVED FOR PRODUCTION
-                                        <div className="bg-yellow-100 p-2 mb-3 text-xs">
+                                        <div className="bg-yellow-100 p-2 mb-3 text-xs hidden">
                                             DEBUG: selectedGroups = {JSON.stringify(selectedGroups)}
                                         </div>
-                                        */}
                                         {groups.length === 0 ? (
-                                            <p className="text-sm text-stone-400 text-center py-4">No groups available</p>
+                                            <p className="text-sm text-stone-400 text-center py-4">{t('no_groups_avail')}</p>
                                         ) : (
                                             <div className="space-y-2">
                                                 {groups.map((group) => {
                                                     const isChecked = selectedGroups.includes(group.id);
-                                                    console.log(`[Checkbox Render] Group: ${group.name}, ID: ${group.id}, isChecked: ${isChecked}, selectedGroups:`, selectedGroups);
                                                     return (
                                                         <label
                                                             key={group.id}
@@ -482,7 +481,6 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                                                 type="checkbox"
                                                                 checked={isChecked}
                                                                 onChange={(e) => {
-                                                                    console.log(`[Checkbox Change] Group: ${group.name}, checked: ${e.target.checked}`);
                                                                     if (e.target.checked) {
                                                                         setSelectedGroups([...selectedGroups, group.id]);
                                                                     } else {
@@ -500,7 +498,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                                                 </div>
                                                                 <div>
                                                                     <div className="text-sm font-medium text-stone-700">{group.name}</div>
-                                                                    <div className="text-xs text-stone-500">{group.members.length} members</div>
+                                                                    <div className="text-xs text-stone-500">{t('members_count', { count: group.members.length })}</div>
                                                                 </div>
                                                             </div>
                                                         </label>
@@ -515,10 +513,10 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                 {accessTab === 'members' && (
                                     <div className="bg-stone-50 rounded-lg p-4 max-h-64 overflow-y-auto">
                                         <p className="text-xs text-stone-500 mb-3">
-                                            Select members ({selectedMembers.length} selected)
+                                            {t('select_members_count', { count: selectedMembers.length })}
                                         </p>
                                         {users.length === 0 ? (
-                                            <p className="text-sm text-stone-400 text-center py-4">No other users available</p>
+                                            <p className="text-sm text-stone-400 text-center py-4">{t('no_users_avail')}</p>
                                         ) : (
                                             <div className="space-y-2">
                                                 {users.map((user) => (
@@ -558,7 +556,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                             </div>
 
                             <Button type="submit" className="w-full py-3 mt-4">
-                                {editAlbum ? 'Save Changes' : 'Create Secure Album'}
+                                {editAlbum ? t('save_changes') : t('create_secure_album')}
                             </Button>
                         </form>
                     )}
@@ -567,8 +565,8 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     {step === 'PROCESSING' && (
                         <div className="py-12 text-center space-y-4">
                             <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto" />
-                            <h3 className="text-lg font-medium text-stone-700">Generating Secure Keys...</h3>
-                            <p className="text-sm text-stone-400">Binding encryption to this device</p>
+                            <h3 className="text-lg font-medium text-stone-700">{t('generating_keys')}</h3>
+                            <p className="text-sm text-stone-400">{t('binding_encryption')}</p>
                         </div>
                     )}
 
@@ -578,8 +576,8 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                             <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex gap-3 text-amber-800 text-sm">
                                 <AlertTriangle className="shrink-0" />
                                 <div>
-                                    <p className="font-bold mb-1">Backup Required</p>
-                                    <p>Since we eliminated the PIN, this Recovery Key is the <strong>ONLY</strong> way to access your photos on a new device.</p>
+                                    <p className="font-bold mb-1">{t('backup_required')}</p>
+                                    <p dangerouslySetInnerHTML={{ __html: t('backup_desc') }}></p>
                                 </div>
                             </div>
 
@@ -594,9 +592,9 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                     className={`w-full py-4 text-base ${hasDownloaded ? 'border-green-500 text-green-700 bg-green-50' : ''}`}
                                 >
                                     {hasDownloaded ? (
-                                        <><Check size={20} className="mr-2" /> Downloaded</>
+                                        <><Check size={20} className="mr-2" /> {t('downloaded')}</>
                                     ) : (
-                                        <><Download size={20} className="mr-2" /> Download Recovery Kit</>
+                                        <><Download size={20} className="mr-2" /> {t('download_recovery_kit')}</>
                                     )}
                                 </Button>
 
@@ -605,7 +603,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                     disabled={!hasDownloaded}
                                     className="w-full py-4 text-base"
                                 >
-                                    Finish Setup
+                                    {t('finish_setup')}
                                 </Button>
                             </div>
                         </div>

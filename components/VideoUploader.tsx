@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Upload, Video as VideoIcon, X, Film } from 'lucide-react';
 import { videoService } from '../services/videoService';
 import { VideoUploadProgress } from '../types';
@@ -17,6 +18,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
     onUploadComplete,
     onClose
 }) => {
+    const { t } = useTranslation();
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
@@ -29,19 +31,19 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
         const file = e.target.files?.[0];
         if (file && file.type.startsWith('video/')) {
             if (file.size > 100 * 1024 * 1024) {
-                alert('Video size must be less than 100MB');
+                alert(t('video_size_limit_error'));
                 return;
             }
             setSelectedFile(file);
             setTitle(file.name.replace(/\.[^/.]+$/, '')); // Remove extension
         } else {
-            alert('Please select a video file (MP4, WebM, or MOV)');
+            alert(t('video_format_error'));
         }
     };
 
     const handleUpload = async () => {
         if (!selectedFile || !title.trim()) {
-            alert('Please select a video and enter a title');
+            alert(t('video_title_required_error'));
             return;
         }
 
@@ -70,7 +72,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
             setUploadProgress(null);
 
             onUploadComplete?.(videoId);
-            alert('Video uploaded successfully!');
+            alert(t('video_upload_success'));
         } catch (error: any) {
             // Completely silent for permission errors - no logs at all
             if (error?.code === 'storage/unauthorized' || error?.message?.includes('permission')) {
@@ -78,7 +80,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
             } else {
                 // Log and alert only for non-permission errors
                 console.error('Error uploading video:', error);
-                alert('Failed to upload video: ' + (error.message || 'Unknown error'));
+                alert(t('video_upload_error', { error: error.message || 'Unknown error' }));
             }
         } finally {
             setIsUploading(false);
@@ -90,7 +92,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
             <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold flex items-center gap-2">
                     <Film className="text-orange-500" />
-                    Upload Video
+                    {t('upload_video_title')}
                 </h2>
                 {onClose && (
                     <button
@@ -106,8 +108,8 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
             {!selectedFile ? (
                 <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-stone-300 rounded-xl cursor-pointer hover:border-orange-500 hover:bg-orange-50 transition-all">
                     <Upload size={48} className="text-stone-400 mb-4" />
-                    <span className="text-stone-600 font-medium">Click to select video</span>
-                    <span className="text-stone-400 text-sm mt-2">MP4, WebM, or MOV (Max 100MB)</span>
+                    <span className="text-stone-600 font-medium">{t('click_to_select_video')}</span>
+                    <span className="text-stone-400 text-sm mt-2">{t('video_format_hint')}</span>
                     <input
                         type="file"
                         className="hidden"
@@ -141,40 +143,40 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
                     {/* Upload Form */}
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium mb-2">Title *</label>
+                            <label className="block text-sm font-medium mb-2">{t('video_title_label')}</label>
                             <input
                                 type="text"
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
                                 disabled={isUploading}
                                 className="w-full px-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 disabled:bg-stone-100"
-                                placeholder="Enter video title"
+                                placeholder={t('video_title_placeholder')}
                                 maxLength={100}
                             />
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">Description</label>
+                            <label className="block text-sm font-medium mb-2">{t('video_desc_label')}</label>
                             <textarea
                                 value={description}
                                 onChange={(e) => setDescription(e.target.value)}
                                 disabled={isUploading}
                                 className="w-full px-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 h-24 disabled:bg-stone-100 resize-none"
-                                placeholder="Enter video description"
+                                placeholder={t('video_desc_placeholder')}
                                 maxLength={500}
                             />
                             <p className="text-xs text-stone-400 mt-1">{description.length}/500</p>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">Tags (comma separated)</label>
+                            <label className="block text-sm font-medium mb-2">{t('video_tags_label')}</label>
                             <input
                                 type="text"
                                 value={tags}
                                 onChange={(e) => setTags(e.target.value)}
                                 disabled={isUploading}
                                 className="w-full px-4 py-2 border border-stone-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 disabled:bg-stone-100"
-                                placeholder="tag1, tag2, tag3"
+                                placeholder={t('video_tags_placeholder')}
                             />
                         </div>
 
@@ -186,7 +188,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
                                 disabled={isUploading}
                                 className="w-4 h-4 text-orange-500 rounded focus:ring-orange-500"
                             />
-                            <span className="text-sm">Make video public</span>
+                            <span className="text-sm">{t('make_video_public')}</span>
                         </label>
                     </div>
 
@@ -218,12 +220,12 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
                         {isUploading ? (
                             <>
                                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                <span>Uploading...</span>
+                                <span>{t('uploading_state')}</span>
                             </>
                         ) : (
                             <>
                                 <Upload size={20} />
-                                <span>Upload Video</span>
+                                <span>{t('upload_video_title')}</span>
                             </>
                         )}
                     </button>

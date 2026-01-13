@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Search, FolderOpen, ArrowUpDown } from 'lucide-react';
 import { Album } from '../types';
 import { AlbumCard } from './AlbumCard';
@@ -17,6 +18,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
     onEditAlbum,
     onViewAlbum
 }) => {
+    const { t } = useTranslation();
     const [albums, setAlbums] = useState<Album[]>([]);
     const [filteredAlbums, setFilteredAlbums] = useState<Album[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -109,8 +111,8 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
             {/* Header */}
             <div className="mb-8 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold text-stone-800">My Albums</h1>
-                    <p className="text-stone-500 mt-1">Organize your family memories</p>
+                    <h1 className="text-3xl font-bold text-stone-800">{t('album_grid_title')}</h1>
+                    <p className="text-stone-500 mt-1">{t('album_grid_subtitle')}</p>
                 </div>
 
                 <button
@@ -118,7 +120,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                     className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 flex items-center gap-2 font-medium"
                 >
                     <Plus size={20} />
-                    <span>Create Album</span>
+                    <span>{t('create_album')}</span>
                 </button>
             </div>
 
@@ -132,7 +134,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                             type="text"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder="Search albums..."
+                            placeholder={t('search_albums_placeholder')}
                             className="w-full pl-12 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all"
                         />
                     </div>
@@ -140,16 +142,16 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                     {/* Sort Dropdown */}
                     <div className="flex items-center gap-3">
                         <ArrowUpDown size={16} className="text-stone-400" />
-                        <span className="text-sm font-medium text-stone-600">Sort by:</span>
+                        <span className="text-sm font-medium text-stone-600">{t('sort_by')}</span>
                         <select
                             value={sortBy}
                             onChange={(e) => setSortBy(e.target.value as any)}
                             className="px-4 py-3 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
                         >
-                            <option value="newest">Newest First</option>
-                            <option value="oldest">Oldest First</option>
-                            <option value="photos">Most Photos</option>
-                            <option value="videos">Most Videos</option>
+                            <option value="newest">{t('sort_newest')}</option>
+                            <option value="oldest">{t('sort_oldest')}</option>
+                            <option value="photos">{t('sort_most_photos')}</option>
+                            <option value="videos">{t('sort_most_videos')}</option>
                         </select>
                     </div>
                 </div>
@@ -162,12 +164,12 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                         <FolderOpen size={40} className="text-stone-300" />
                     </div>
                     <h3 className="text-xl font-semibold text-stone-700 mb-2">
-                        {searchTerm ? 'No albums found' : 'No albums yet'}
+                        {searchTerm ? t('no_albums_found') : t('no_albums_yet')}
                     </h3>
                     <p className="text-stone-500 mb-6">
                         {searchTerm
-                            ? 'Try a different search term'
-                            : 'Create your first album to start organizing photos'}
+                            ? t('hint_search')
+                            : t('hint_create_first_album')}
                     </p>
                     {!searchTerm && (
                         <button
@@ -175,7 +177,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                             className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 inline-flex items-center gap-2 font-medium"
                         >
                             <Plus size={20} />
-                            <span>Create Your First Album</span>
+                            <span>{t('create_first_album')}</span>
                         </button>
                     )}
                 </div>
@@ -198,12 +200,12 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
             {deleteConfirm && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in-up">
-                        <h3 className="text-xl font-bold text-stone-800 mb-2">Delete Album?</h3>
+                        <h3 className="text-xl font-bold text-stone-800 mb-2">{t('delete_album_title')}</h3>
                         <p className="text-stone-600 mb-2">
-                            This will permanently delete this album and <strong>all photos and videos</strong> inside it.
+                            <span dangerouslySetInnerHTML={{ __html: t('delete_album_message') }}></span>
                         </p>
                         <p className="text-red-600 text-sm font-medium mb-6">
-                            ⚠️ This action cannot be undone!
+                            {t('delete_album_warning')}
                         </p>
                         <div className="flex gap-3">
                             <button
@@ -211,7 +213,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                                 disabled={isDeleting}
                                 className="flex-1 px-4 py-3 bg-stone-100 text-stone-700 rounded-xl hover:bg-stone-200 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                Cancel
+                                {t('cancel')}
                             </button>
                             <button
                                 onClick={() => handleDelete(deleteConfirm)}
@@ -221,10 +223,10 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                                 {isDeleting ? (
                                     <>
                                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        <span>Deleting...</span>
+                                        <span>{t('deleting')}</span>
                                     </>
                                 ) : (
-                                    'Delete'
+                                    t('delete')
                                 )}
                             </button>
                         </div>

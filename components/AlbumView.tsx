@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Upload, Edit, Trash2, MoreVertical, Image as ImageIcon, Lock, KeyRound, Video, ChevronDown, ArrowUpDown, Filter, X, Users } from 'lucide-react';
 import { Album, Post, Video as VideoType } from '../types';
 import { PhotoCard } from './PhotoCard';
@@ -36,6 +37,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     onPhotoClick,
     onInvite
 }) => {
+    const { t } = useTranslation();
     const { getAlbumKey, unlockAlbum, autoUnlockAlbum } = useAuth();
     const [posts, setPosts] = useState<Post[]>([]);
     const [videos, setVideos] = useState<VideoType[]>([]);
@@ -233,7 +235,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                     className="flex items-center gap-2 text-stone-600 hover:text-stone-800 mb-4 group"
                 >
                     <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
-                    <span>Back to Albums</span>
+                    <span>{t('back_to_albums')}</span>
                 </button>
 
                 <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between overflow-visible">
@@ -245,20 +247,20 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                         <div className="flex items-center gap-3 text-sm text-stone-500 overflow-visible">
                             <span className="flex items-center gap-1.5">
                                 <ImageIcon size={16} />
-                                {posts.length + videos.length} {posts.length + videos.length === 1 ? 'item' : 'items'}
+                                {posts.length + videos.length} {t('items')}
                             </span>
                             <span>•</span>
                             <span className="capitalize">{album.privacy}</span>
                             {album.members.length > 1 && (
                                 <>
                                     <span>•</span>
-                                    <span>{album.members.length} members</span>
+                                    <span>{album.members.length} {t('members')}</span>
                                 </>
                             )}
 
                             {!albumKey && (
                                 <span className="flex items-center gap-1 text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full text-xs font-bold">
-                                    <Lock size={12} /> Vault Locked
+                                    <Lock size={12} /> {t('vault_locked')}
                                 </span>
                             )}
                         </div>
@@ -272,7 +274,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                                 className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 flex items-center gap-2 font-medium"
                             >
                                 <Upload size={20} />
-                                <span>Upload</span>
+                                <span>{t('upload')}</span>
                                 <ChevronDown size={16} className={`transition-transform ${showUploadMenu ? 'rotate-180' : ''}`} />
                             </button>
 
@@ -292,8 +294,8 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                                         >
                                             <ImageIcon size={18} className="text-orange-500" />
                                             <div>
-                                                <p className="font-medium">Upload Photos</p>
-                                                <p className="text-xs text-stone-500">Add images to album</p>
+                                                <p className="font-medium">{t('upload_photos')}</p>
+                                                <p className="text-xs text-stone-500">{t('upload_photos_desc')}</p>
                                             </div>
                                         </button>
                                         {onUploadVideo && (
@@ -308,8 +310,8 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                                                 >
                                                     <Video size={18} className="text-orange-500" />
                                                     <div>
-                                                        <p className="font-medium">Upload Videos</p>
-                                                        <p className="text-xs text-stone-500">Add videos to album</p>
+                                                        <p className="font-medium">{t('upload_videos')}</p>
+                                                        <p className="text-xs text-stone-500">{t('upload_videos_desc')}</p>
                                                     </div>
                                                 </button>
                                             </>
@@ -324,7 +326,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                                 <button
                                     onClick={onInvite}
                                     className="p-3 hover:bg-stone-100 rounded-xl transition-colors text-stone-600 hover:text-stone-800"
-                                    title="Invite Members"
+                                    title={t('invite_members')}
                                 >
                                     <Users size={20} />
                                 </button>
@@ -353,7 +355,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                                                     className="w-full px-4 py-3 text-left text-sm text-stone-700 hover:bg-stone-50 flex items-center gap-3 transition-colors"
                                                 >
                                                     <Edit size={16} />
-                                                    <span className="font-medium">Edit Album</span>
+                                                    <span className="font-medium">{t('edit_album')}</span>
                                                 </button>
                                                 <div className="h-px bg-stone-200 mx-2" />
                                                 <button
@@ -364,7 +366,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                                                     className="w-full px-4 py-3 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
                                                 >
                                                     <Trash2 size={16} />
-                                                    <span className="font-medium">Delete Album</span>
+                                                    <span className="font-medium">{t('delete_album')}</span>
                                                 </button>
                                             </div>
                                         </>
@@ -386,7 +388,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                             : 'text-stone-500 hover:text-stone-700'
                             }`}
                     >
-                        All
+                        {t('filter_all')}
                     </button>
                     <button
                         onClick={() => setFilterMode('photos')}
@@ -395,7 +397,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                             : 'text-stone-500 hover:text-stone-700'
                             }`}
                     >
-                        Photos
+                        {t('filter_photos')}
                     </button>
                     <button
                         onClick={() => setFilterMode('videos')}
@@ -404,23 +406,23 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                             : 'text-stone-500 hover:text-stone-700'
                             }`}
                     >
-                        Videos
+                        {t('filter_videos')}
                     </button>
                 </div>
 
                 {/* Sort Dropdown */}
                 <div className="flex items-center gap-3">
                     <ArrowUpDown size={16} className="text-stone-400" />
-                    <span className="text-sm font-medium text-stone-600">Sort by:</span>
+                    <span className="text-sm font-medium text-stone-600">{t('sort_by')}</span>
                     <select
                         value={sortBy}
                         onChange={(e) => setSortBy(e.target.value as any)}
                         className="px-4 py-2 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
                     >
-                        <option value="newest">Newest First</option>
-                        <option value="oldest">Oldest First</option>
-                        <option value="liked">Most Liked</option>
-                        <option value="commented">Most Commented</option>
+                        <option value="newest">{t('sort_newest')}</option>
+                        <option value="oldest">{t('sort_oldest')}</option>
+                        <option value="liked">{t('sort_liked')}</option>
+                        <option value="commented">{t('sort_commented')}</option>
                     </select>
                 </div>
 
@@ -434,7 +436,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                             }`}
                     >
                         <Filter size={16} />
-                        <span>Filters</span>
+                        <span>{t('filters')}</span>
                         {activeFilterCount > 0 && (
                             <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                                 {activeFilterCount}
@@ -446,7 +448,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                             onClick={clearFilters}
                             className="text-sm text-stone-500 hover:text-stone-700 font-medium"
                         >
-                            Clear
+                            {t('clear_all')}
                         </button>
                     )}
                 </div>
@@ -455,7 +457,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
             {/* Active Filter Chips */}
             {activeFilterCount > 0 && (
                 <div className="flex flex-wrap gap-2 items-center mb-6 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <span className="text-sm font-medium text-stone-600">Active filters:</span>
+                    <span className="text-sm font-medium text-stone-600">{t('active_filters')}</span>
                     {selectedTags.map(tag => {
                         const user = availableUsers.find(u => u.id === tag);
                         const displayName = user?.name || tag;
@@ -489,11 +491,11 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                         {/* Tags Filter */}
                         <div>
                             <label className="block text-sm font-semibold text-stone-800 mb-3">
-                                Tagged People
+                                {t('filter_tagged_people')}
                             </label>
                             <div className="flex flex-wrap gap-2">
                                 {uniqueTags.length === 0 ? (
-                                    <p className="text-sm text-stone-400">No tags available</p>
+                                    <p className="text-sm text-stone-400">{t('no_tags')}</p>
                                 ) : (
                                     uniqueTags.map(tag => {
                                         const user = availableUsers.find(u => u.id === tag);
@@ -525,7 +527,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                         {/* Uploader Filter */}
                         <div>
                             <label className="block text-sm font-semibold text-stone-800 mb-3">
-                                Uploaded By
+                                {t('filter_uploaded_by')}
                             </label>
                             <div className="flex flex-wrap gap-2">
                                 {availableUsers.map(user => {
@@ -565,18 +567,18 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                 checkingVault ? (
                     <div className="flex flex-col items-center justify-center h-64">
                         <div className="w-12 h-12 border-4 border-stone-200 border-t-orange-500 rounded-full animate-spin mb-4" />
-                        <p className="text-stone-500 font-medium animate-pulse">Unlocking Vault...</p>
+                        <p className="text-stone-500 font-medium animate-pulse">{t('unlocking_vault')}</p>
                     </div>
                 ) : (
                     <div className="text-center py-20 bg-stone-50 rounded-3xl border-2 border-dashed border-stone-200">
                         <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-6">
                             <Lock size={40} className="text-stone-300" />
                         </div>
-                        <h3 className="text-xl font-semibold text-stone-700 mb-2">Encrypted Album</h3>
-                        <p className="text-stone-500 mb-8 max-w-sm mx-auto">This album is locked on this device. Use your Recovery Key to access it.</p>
+                        <h3 className="text-xl font-semibold text-stone-700 mb-2">{t('encypted_album')}</h3>
+                        <p className="text-stone-500 mb-8 max-w-sm mx-auto">{t('encrypted_album_desc')}</p>
                         <Button onClick={() => setShowUnlock(true)} className="px-8 py-3">
                             <KeyRound size={20} className="mr-2" />
-                            Unlock Gallery
+                            {t('unlock_gallery')}
                         </Button>
                     </div>
                 )
@@ -585,14 +587,14 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                     <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
                         <ImageIcon size={40} className="text-stone-300" />
                     </div>
-                    <h3 className="text-xl font-semibold text-stone-700 mb-2">No content yet</h3>
-                    <p className="text-stone-500 mb-6">Start adding photos or videos to this album</p>
+                    <h3 className="text-xl font-semibold text-stone-700 mb-2">{t('no_content_yet')}</h3>
+                    <p className="text-stone-500 mb-6">{t('no_content_desc')}</p>
                     <button
                         onClick={() => setShowUploadMenu(true)}
                         className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 inline-flex items-center gap-2 font-medium"
                     >
                         <Upload size={20} />
-                        <span>Upload</span>
+                        <span>{t('upload')}</span>
                     </button>
                 </div>
             ) : (

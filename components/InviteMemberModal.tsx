@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Link as LinkIcon, Check, Copy, MessageCircle } from 'lucide-react';
 import { invitationService } from '../services/invitationService';
 import { getMasterKey } from '../lib/crypto/keyStore';
@@ -11,6 +12,7 @@ interface InviteMemberModalProps {
 }
 
 export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, albumId, currUserId }) => {
+    const { t } = useTranslation();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [inviteLink, setInviteLink] = useState('');
@@ -65,7 +67,7 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
             <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-stone-100 flex items-center justify-between bg-stone-50/50">
-                    <h2 className="text-lg font-semibold text-stone-800">Invite Family Member</h2>
+                    <h2 className="text-lg font-semibold text-stone-800">{t('invite_modal_title')}</h2>
                     <button
                         onClick={onClose}
                         className="p-2 -mr-2 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-full transition-all"
@@ -79,7 +81,7 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
                     {!inviteLink ? (
                         <div className="space-y-4">
                             <p className="text-stone-600 text-sm">
-                                Create a secure link to share this album via WhatsApp. The link contains the encryption key needed to view photos.
+                                {t('invite_desc')}
                             </p>
 
                             {error && (
@@ -99,13 +101,13 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
                                 ) : (
                                     <>
                                         <MessageCircle size={22} fill="white" className="text-white" />
-                                        Share on WhatsApp
+                                        {t('share_whatsapp')}
                                     </>
                                 )}
                             </button>
 
                             <p className="text-xs text-center text-stone-400">
-                                This will open WhatsApp with a pre-filled message.
+                                {t('whatsapp_note')}
                             </p>
                         </div>
                     ) : (
@@ -113,9 +115,9 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
                             <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <Check size={32} strokeWidth={3} />
                             </div>
-                            <h3 className="text-center text-lg font-semibold text-stone-800 mb-2">Link Created!</h3>
+                            <h3 className="text-center text-lg font-semibold text-stone-800 mb-2">{t('link_created')}</h3>
                             <p className="text-center text-stone-500 text-sm mb-6">
-                                If WhatsApp didn't open, you can copy the link below.
+                                {t('link_copy_help')}
                             </p>
 
                             <div className="bg-stone-50 p-4 rounded-xl mb-6 border border-stone-100">
@@ -140,7 +142,7 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
                                 onClick={onClose}
                                 className="w-full py-3 bg-stone-900 text-white rounded-xl font-medium hover:bg-stone-800 transition-colors"
                             >
-                                Done
+                                {t('done_btn')}
                             </button>
                         </div>
                     )}

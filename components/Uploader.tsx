@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Upload, X, Image as ImageIcon, Sparkles, Check, Wand2, ChevronDown, GripVertical, Trash2, Plus } from 'lucide-react';
 import { Button } from './Button';
 import { analyzeImage, analyzeMultipleImages } from '../services/geminiService';
@@ -54,6 +55,7 @@ interface ValidationError {
 }
 
 export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, currentAlbumId }) => {
+  const { t } = useTranslation();
   const { user, getAlbumKey, unlockAlbum, googleAccessToken, refreshDriveToken } = useAuth();
   const { addUploads } = useUpload();
   const [isDragging, setIsDragging] = useState(false);
@@ -97,9 +99,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     // Check if it's an image
     if (!file.type.startsWith('image/')) {
       return {
-        title: 'Not an Image File',
-        message: `The file "${file.name}" is not an image.`,
-        suggestion: 'Please select a photo file (JPEG, PNG, or HEIC from your camera).'
+        title: t('error_not_image'),
+        message: t('error_not_image_msg', { name: file.name }),
+        suggestion: t('error_not_image_sugg')
       };
     }
 
@@ -107,9 +109,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     if (!ALLOWED_FORMATS.includes(file.type.toLowerCase())) {
       const detectedType = file.type || 'Unknown';
       return {
-        title: 'Unsupported Image Format',
-        message: `${detectedType.replace('image/', '').toUpperCase()} format is not supported.`,
-        suggestion: `Please use photos from your phone or camera. Supported formats: JPEG, PNG, HEIC (iPhone photos).`
+        title: t('error_unsupported_format'),
+        message: t('error_unsupported_format_msg', { format: detectedType.replace('image/', '').toUpperCase() }),
+        suggestion: t('error_unsupported_format_sugg')
       };
     }
 
@@ -117,18 +119,18 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     if (file.size > MAX_FILE_SIZE) {
       const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
       return {
-        title: 'File Too Large',
-        message: `This photo is ${sizeMB}MB, which exceeds the 20MB limit.`,
-        suggestion: 'Try reducing the image quality in your camera settings, or use a photo editor to compress it.'
+        title: t('error_file_too_large'),
+        message: t('error_file_too_large_msg', { size: sizeMB }),
+        suggestion: t('error_file_too_large_sugg')
       };
     }
 
     // Check if file is suspiciously small (might be corrupted)
     if (file.size < 1024) {
       return {
-        title: 'Invalid Image File',
-        message: 'This file appears to be corrupted or incomplete.',
-        suggestion: 'Please try selecting a different photo.'
+        title: t('error_invalid_image'),
+        message: t('error_invalid_image_msg'),
+        suggestion: t('error_invalid_image_sugg')
       };
     }
 
@@ -144,9 +146,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     // Check total count (including existing files)
     if (filesToUpload.length + filesArray.length > MAX_IMAGES_PER_POST) {
       setValidationError({
-        title: 'Too Many Images',
-        message: `You can upload a maximum of ${MAX_IMAGES_PER_POST} images per post.`,
-        suggestion: `You currently have ${filesToUpload.length} image(s). You can add ${MAX_IMAGES_PER_POST - filesToUpload.length} more.`
+        title: t('error_too_many_images'),
+        message: t('error_too_many_images_msg', { max: MAX_IMAGES_PER_POST }),
+        suggestion: t('error_too_many_images_sugg', { count: filesToUpload.length, remaining: MAX_IMAGES_PER_POST - filesToUpload.length })
       });
       return;
     }
@@ -239,12 +241,12 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     } catch (error: any) {
       console.error("Analysis failed", error);
       setValidationError({
-        title: 'AI Analysis Failed',
-        message: 'Unable to analyze your photos automatically.',
-        suggestion: 'The photos will still be uploaded, but you may need to add details manually.'
+        title: t('error_ai_failed'),
+        message: t('error_ai_failed_msg'),
+        suggestion: t('error_ai_failed_sugg')
       });
       setAnalysis({
-        caption: files.length > 1 ? 'A beautiful collection of memories' : 'A beautiful family memory',
+        caption: files.length > 1 ? t('default_caption_multiple', 'A beautiful collection of memories') : t('default_caption_single', 'A beautiful family memory'),
         tags: ['Family', 'Memory'],
         album: 'General'
       });
@@ -270,9 +272,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
   const handleCreateAlbum = async () => {
     if (!newAlbumName.trim() || !user) {
       setValidationError({
-        title: 'Album Name Required',
-        message: 'Please enter a name for your new album.',
-        suggestion: 'Album names must be between 1 and 50 characters.'
+        title: t('error_album_name_req'),
+        message: t('error_album_name_req_msg'),
+        suggestion: t('error_album_name_req_sugg')
       });
       return;
     }
@@ -352,9 +354,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     } catch (error: any) {
       console.error('[Uploader] Failed to create album:', error);
       setValidationError({
-        title: 'Album Creation Failed',
-        message: error.message || 'Could not create the album.',
-        suggestion: 'Please try again or select an existing album.'
+        title: t('error_album_create_failed'),
+        message: error.message || t('error_album_create_failed_msg'),
+        suggestion: t('error_album_create_failed_sugg')
       });
     } finally {
       setIsCreatingAlbum(false);
@@ -367,9 +369,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     if (filesToUpload.length === 0 || !analysis || !user || !onUploadComplete) return;
     if (!selectedAlbumId) {
       setValidationError({
-        title: 'Album Required',
-        message: 'Please select an album to store your photos securely.',
-        suggestion: 'Choose an album from the dropdown list.'
+        title: t('error_album_req'),
+        message: t('error_album_req_msg'),
+        suggestion: t('error_album_req_sugg')
       });
       return;
     }
@@ -407,9 +409,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
     } catch (error: any) {
       console.error("Upload queue failed", error);
       setValidationError({
-        title: 'Upload Failed',
-        message: error.message || "Failed to queue secure photos.",
-        suggestion: 'Please try again.'
+        title: t('error_upload_failed'),
+        message: error.message || t('error_upload_failed_msg'),
+        suggestion: t('error_upload_failed_sugg')
       });
     } finally {
       setIsQueueing(false);
@@ -426,7 +428,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
             <div className="bg-orange-100 p-1.5 rounded-lg text-orange-500">
               <Wand2 size={18} />
             </div>
-            <h2 className="text-lg font-bold text-stone-800">Add Memory</h2>
+            <h2 className="text-lg font-bold text-stone-800">{t('add_memory_title')}</h2>
           </div>
           <button onClick={onCancel} className="p-2 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-full transition-colors">
             <X size={20} />
@@ -460,9 +462,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                 <div className="w-20 h-20 bg-white shadow-sm rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
                   <Upload size={32} className="text-orange-400" />
                 </div>
-                <h3 className="text-xl font-bold text-stone-800 mb-2">Drop your photos here</h3>
-                <p className="text-stone-500 text-sm max-w-xs mx-auto">or click to browse from your computer</p>
-                <p className="text-stone-400 text-xs mt-4">Supports JPEG, PNG, HEIC (max 20MB each, {MAX_IMAGES_PER_POST} photos max)</p>
+                <h3 className="text-xl font-bold text-stone-800 mb-2">{t('drop_photos_here')}</h3>
+                <p className="text-stone-500 text-sm max-w-xs mx-auto">{t('browse_computer')}</p>
+                <p className="text-stone-400 text-xs mt-4">{t('upload_formats', { max: MAX_IMAGES_PER_POST })}</p>
               </div>
 
               {/* Validation Error Message */}
@@ -480,7 +482,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                         onClick={() => setValidationError(null)}
                         className="mt-4 px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-sm font-medium transition-colors"
                       >
-                        Try Again
+                        {t('try_again')}
                       </button>
                     </div>
                   </div>
@@ -493,7 +495,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
               <div>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-bold text-stone-400 uppercase tracking-wider">
-                    Selected Photos ({filesToUpload.length}/{MAX_IMAGES_PER_POST})
+                    {t('selected_photos', { count: filesToUpload.length, max: MAX_IMAGES_PER_POST })}
                   </h3>
                   <Button
                     variant="ghost"
@@ -505,7 +507,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                     }}
                     className="text-xs text-stone-500"
                   >
-                    Clear All
+                    {t('clear_all_photos')}
                   </Button>
                 </div>
 
@@ -533,7 +535,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                       className="aspect-square rounded-xl border-2 border-dashed border-stone-300 hover:border-orange-400 hover:bg-orange-50/50 flex flex-col items-center justify-center cursor-pointer transition-all"
                     >
                       <Plus size={24} className="text-stone-400 mb-1" />
-                      <span className="text-xs text-stone-500 font-medium">Add More</span>
+                      <span className="text-xs text-stone-500 font-medium">{t('add_more')}</span>
                     </div>
                   )}
                 </div>
@@ -544,7 +546,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                   <div>
                     <h3 className="text-sm font-bold text-stone-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                       <Sparkles size={16} className="text-teal-500" />
-                      AI Insights
+                      {t('ai_insights')}
                     </h3>
 
                     {isAnalyzing ? (
@@ -558,12 +560,12 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                           <div className="h-8 w-24 bg-stone-100 rounded-full animate-pulse"></div>
                           <div className="h-8 w-16 bg-stone-100 rounded-full animate-pulse"></div>
                         </div>
-                        <p className="text-xs text-stone-400 animate-pulse pt-2">Crafting a caption...</p>
+                        <p className="text-xs text-stone-400 animate-pulse pt-2">{t('crafting_caption')}</p>
                       </div>
                     ) : analysis ? (
                       <div className="space-y-6 animate-fade-in-up">
                         <div className="relative group">
-                          <label className="block text-[11px] font-bold uppercase tracking-wider text-orange-600 mb-2">Caption</label>
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-orange-600 mb-2">{t('label_caption')}</label>
                           <textarea
                             className="w-full bg-orange-50/50 hover:bg-orange-50 focus:bg-white border-2 border-transparent focus:border-orange-200 rounded-xl p-4 text-stone-800 font-medium text-lg leading-relaxed focus:ring-0 resize-none transition-all placeholder:text-stone-300"
                             rows={3}
@@ -576,7 +578,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-2">Tags</label>
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-2">{t('label_tags')}</label>
                           <div className="flex flex-wrap gap-2">
                             {analysis.tags.map((tag, i) => (
                               <span key={i} className="pl-3 pr-2 py-1.5 bg-white text-stone-600 rounded-lg text-sm font-medium border border-stone-200 shadow-sm flex items-center gap-2 group">
@@ -593,7 +595,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-2">Album</label>
+                          <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-2">{t('label_album')}</label>
                           <div className="relative">
                             <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-teal-500">
                               <ImageIcon size={16} />
@@ -611,11 +613,11 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                               }}
                               className="appearance-none w-full bg-stone-50 border border-stone-200 text-stone-700 py-3 pl-10 pr-10 rounded-xl focus:ring-2 focus:ring-orange-200 focus:border-orange-300 transition-all font-semibold text-sm cursor-pointer"
                             >
-                              <option value="" disabled>Select an Album</option>
+                              <option value="" disabled>{t('select_album')}</option>
                               {albums.map(album => (
                                 <option key={album.id} value={album.id}>{album.name}</option>
                               ))}
-                              <option value="CREATE_NEW" className="font-bold text-orange-600">+ Create New Album</option>
+                              <option value="CREATE_NEW" className="font-bold text-orange-600">{t('create_new_album_option')}</option>
                             </select>
                             <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-stone-400">
                               <ChevronDown size={16} />
@@ -627,7 +629,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                             <div className="mt-4 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl space-y-3 animate-fade-in-up">
                               <h4 className="text-sm font-bold text-blue-900 flex items-center gap-2">
                                 <Plus size={16} />
-                                Create New Album
+                                {t('create_new_album_title')}
                               </h4>
 
                               <div>
@@ -635,7 +637,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                                   type="text"
                                   value={newAlbumName}
                                   onChange={(e) => setNewAlbumName(e.target.value)}
-                                  placeholder="Album name (required)"
+                                  placeholder={t('placeholder_album_name')}
                                   className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-300 outline-none"
                                   maxLength={50}
                                 />
@@ -645,7 +647,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                                 <textarea
                                   value={newAlbumDescription}
                                   onChange={(e) => setNewAlbumDescription(e.target.value)}
-                                  placeholder="Description (optional)"
+                                  placeholder={t('placeholder_album_desc')}
                                   className="w-full px-3 py-2 bg-white border border-blue-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-300 outline-none resize-none"
                                   rows={2}
                                   maxLength={500}
@@ -653,12 +655,12 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                               </div>
 
                               <div>
-                                <label className="block text-xs font-semibold text-blue-900 mb-1.5">Privacy</label>
+                                <label className="block text-xs font-semibold text-blue-900 mb-1.5">{t('privacy_label')}</label>
                                 <div className="grid grid-cols-3 gap-2">
                                   {[
-                                    { value: 'private', label: 'Private' },
-                                    { value: 'family', label: 'Family' },
-                                    { value: 'public', label: 'Public' }
+                                    { value: 'private', label: t('privacy_private') },
+                                    { value: 'family', label: t('privacy_family') },
+                                    { value: 'public', label: t('privacy_public') }
                                   ].map((opt) => (
                                     <button
                                       key={opt.value}
@@ -688,7 +690,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                                   className="flex-1 text-xs"
                                   disabled={isCreatingAlbum}
                                 >
-                                  Cancel
+                                  {t('cancel')}
                                 </Button>
                                 <Button
                                   size="sm"
@@ -697,7 +699,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                                   disabled={!newAlbumName.trim() || isCreatingAlbum}
                                   isLoading={isCreatingAlbum}
                                 >
-                                  Create Album
+                                  {t('create_album')}
                                 </Button>
                               </div>
                             </div>
@@ -705,15 +707,15 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
 
                           {isAnalyzing && (
                             <p className="text-xs text-stone-400 mt-2 ml-1">
-                              AI Suggested: <span className="text-stone-600 font-medium">{analysis.album}</span>
+                              <span dangerouslySetInnerHTML={{ __html: t('ai_suggested', { album: analysis!.album }) }} />
                             </p>
                           )}
                         </div>
                       </div>
                     ) : (
                       <div className="text-center py-10 text-stone-400 bg-stone-50 rounded-xl border border-dashed border-stone-200">
-                        <p>Analysis could not be completed.</p>
-                        <Button variant="ghost" size="sm" onClick={() => runAIAnalysis(filesToUpload)} className="mt-2 text-orange-500">Retry</Button>
+                        <p>{t('analysis_failed_message')}</p>
+                        <Button variant="ghost" size="sm" onClick={() => runAIAnalysis(filesToUpload)} className="mt-2 text-orange-500">{t('retry')}</Button>
                       </div>
                     )}
                   </div>
@@ -727,7 +729,7 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                     className="w-full py-4 text-base shadow-xl shadow-orange-500/20 hover:shadow-orange-500/30 active:scale-[0.98]"
                   >
                     <Check size={20} className="mr-2" />
-                    {filesToUpload.length > 1 ? `Save ${filesToUpload.length} photos as post` : 'Save secure memory'}
+                    {filesToUpload.length > 1 ? t('save_photos_post', { count: filesToUpload.length }) : t('save_secure_memory')}
                   </Button>
                 </div>
               </div>

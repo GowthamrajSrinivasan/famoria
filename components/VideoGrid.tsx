@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { VideoCard } from './VideoCard';
 import { VideoLightbox } from './VideoLightbox';
 import { VideoUploader } from './VideoUploader';
@@ -14,6 +15,7 @@ interface VideoGridProps {
 }
 
 export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) => {
+    const { t } = useTranslation();
     const [videos, setVideos] = useState<Video[]>([]);
     const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
     const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'liked' | 'viewed'>('newest');
@@ -137,7 +139,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
         return (
             <div className="flex flex-col items-center justify-center py-20">
                 <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4" />
-                <p className="text-stone-500">Loading videos...</p>
+                <p className="text-stone-500">{t('loading_videos')}</p>
             </div>
         );
     }
@@ -148,9 +150,9 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
             <div className="flex flex-col gap-4 mb-8">
                 <div className="flex justify-between items-center">
                     <div>
-                        <h1 className="text-3xl font-bold text-stone-800 mb-2 font-serif">Videos</h1>
+                        <h1 className="text-3xl font-bold text-stone-800 mb-2 font-serif">{t('videos_title')}</h1>
                         <p className="text-stone-500">
-                            {videos.length === 0 ? 'No videos yet' : `${videos.length} video${videos.length === 1 ? '' : 's'}`}
+                            {videos.length === 0 ? t('no_videos_yet') : t(videos.length === 1 ? 'video_count_one' : 'video_count_other', { count: videos.length })}
                         </p>
                     </div>
                     {currentUser && (
@@ -159,7 +161,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
                             className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-semibold rounded-xl shadow-lg shadow-orange-500/30 hover:shadow-orange-500/50 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
                         >
                             <Plus size={20} />
-                            Upload Video
+                            {t('upload_video')}
                         </button>
                     )}
                 </div>
@@ -169,16 +171,16 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
                     <div className="flex flex-wrap items-center gap-3">
                         <div className="flex items-center gap-3">
                             <ArrowUpDown size={16} className="text-stone-400" />
-                            <span className="text-sm font-medium text-stone-600">Sort by:</span>
+                            <span className="text-sm font-medium text-stone-600">{t('sort_by')}</span>
                             <select
                                 value={sortBy}
                                 onChange={(e) => setSortBy(e.target.value as any)}
                                 className="px-4 py-2 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
                             >
-                                <option value="newest">Newest First</option>
-                                <option value="oldest">Oldest First</option>
-                                <option value="liked">Most Liked</option>
-                                <option value="viewed">Most Viewed</option>
+                                <option value="newest">{t('sort_newest')}</option>
+                                <option value="oldest">{t('sort_oldest')}</option>
+                                <option value="liked">{t('sort_liked')}</option>
+                                <option value="viewed">{t('sort_viewed')}</option>
                             </select>
                         </div>
 
@@ -192,7 +194,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
                                     }`}
                             >
                                 <Filter size={16} />
-                                <span>Filters</span>
+                                <span>{t('filters')}</span>
                                 {activeFilterCount > 0 && (
                                     <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
                                         {activeFilterCount}
@@ -204,7 +206,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
                                     onClick={clearFilters}
                                     className="text-sm text-stone-500 hover:text-stone-700 font-medium"
                                 >
-                                    Clear
+                                    {t('clear_all')}
                                 </button>
                             )}
                         </div>
@@ -219,11 +221,11 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
                         {/* Tags Filter */}
                         <div>
                             <label className="block text-sm font-medium text-stone-700 mb-2">
-                                Tagged People
+                                {t('filter_tagged_people')}
                             </label>
                             <div className="max-h-48 overflow-y-auto border border-stone-200 rounded-lg p-2 space-y-1">
                                 {uniqueTags.length === 0 ? (
-                                    <p className="text-sm text-stone-400 p-2">No tags available</p>
+                                    <p className="text-sm text-stone-400 p-2">{t('no_tags')}</p>
                                 ) : (
                                     uniqueTags.map(tag => {
                                         const user = availableUsers.find(u => u.id === tag);
@@ -253,7 +255,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
                         {/* Uploader Filter */}
                         <div>
                             <label className="block text-sm font-medium text-stone-700 mb-2">
-                                Uploaded By
+                                {t('filter_uploaded_by')}
                             </label>
                             <div className="max-h-48 overflow-y-auto border border-stone-200 rounded-lg p-2 space-y-1">
                                 {availableUsers.map(user => (
@@ -280,11 +282,11 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
                         {!albumId && (
                             <div>
                                 <label className="block text-sm font-medium text-stone-700 mb-2">
-                                    Albums
+                                    {t('filter_albums')}
                                 </label>
                                 <div className="max-h-48 overflow-y-auto border border-stone-200 rounded-lg p-2 space-y-1">
                                     {availableAlbums.length === 0 ? (
-                                        <p className="text-sm text-stone-400 p-2">No albums available</p>
+                                        <p className="text-sm text-stone-400 p-2">{t('no_albums')}</p>
                                     ) : (
                                         availableAlbums.map(album => (
                                             <label key={album.id} className="flex items-center gap-2 p-2 hover:bg-stone-50 rounded cursor-pointer">
@@ -315,9 +317,9 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
             {videos.length === 0 ? (
                 <div className="text-center py-20">
                     <Film size={64} className="mx-auto text-stone-300 mb-4" />
-                    <p className="text-stone-500 text-lg font-medium">No videos yet</p>
+                    <p className="text-stone-500 text-lg font-medium">{t('no_videos_yet')}</p>
                     <p className="text-stone-400 text-sm mt-2">
-                        {albumId ? 'Upload videos to this album to get started' : 'Upload your first video to get started'}
+                        {albumId ? t('upload_first_video_album') : t('upload_first_video')}
                     </p>
                 </div>
             ) : (

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Video, User } from '../types';
 import { Heart, MessageCircle, Play, Pause, Trash2, Eye, Volume2, VolumeX, Maximize, SkipBack, SkipForward } from 'lucide-react';
 
@@ -17,6 +18,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     onDelete,
     onLike
 }) => {
+    const { t } = useTranslation();
     const [isDeleting, setIsDeleting] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -67,11 +69,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                         videoRef.current.play()
                             .then(() => {
                                 console.log('✅ Video playing (muted)');
-                                alert('Video started muted. Click volume to unmute.');
+                                alert(t('video_muted_alert'));
                             })
                             .catch((err2) => {
                                 console.error('❌ Still failed:', err2);
-                                alert('Cannot play video. Try clicking the play button.');
+                                alert(t('video_play_error', { error: 'Unknown' }));
                             });
                     }
                 });
@@ -115,7 +117,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 })
                 .catch((error) => {
                     console.error('❌ Error playing video:', error);
-                    alert('Cannot play video: ' + error.message);
+                    alert(t('video_play_error', { error: (error as Error).message }));
                 });
         }
     };
@@ -180,13 +182,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({
         e.stopPropagation();
         if (!onDelete) return;
 
-        if (confirm('Delete this video? This cannot be undone!')) {
+        if (confirm(t('delete_video_confirm'))) {
             setIsDeleting(true);
             try {
                 await onDelete(video.id);
             } catch (error) {
                 console.error('Error deleting video:', error);
-                alert('Failed to delete video');
+                alert(t('delete_video_error'));
                 setIsDeleting(false);
             }
         }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Post, Photo, User } from '../types';
 import { MessageCircle, Calendar, Lock, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { LikeButton } from './LikeButton';
@@ -25,6 +26,7 @@ function isPost(item: Post | Photo): item is Post {
 }
 
 export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUser, onDelete }) => {
+  const { t } = useTranslation();
   const { getAlbumKey } = useAuth();
 
   // State
@@ -244,7 +246,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
     if (!onDelete) return;
 
-    if (!confirm('Are you sure you want to delete this photo? This action cannot be undone.')) {
+    if (!confirm(t('delete_photo_confirm'))) {
       return;
     }
 
@@ -253,7 +255,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
       await onDelete(photo);
     } catch (error) {
       console.error('Failed to delete photo:', error);
-      alert('Failed to delete photo. Please try again.');
+      alert(t('delete_photo_error'));
     } finally {
       setIsDeleting(false);
     }
@@ -274,7 +276,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
         ) : isLocked ? (
           <div className="w-full aspect-square bg-stone-100 flex flex-col items-center justify-center">
             <Lock size={32} className="text-stone-300 mb-2" />
-            <p className="text-xs text-stone-400">Encrypted</p>
+            <p className="text-xs text-stone-400">{t('encrypted_label')}</p>
           </div>
         ) : displayUrls.length > 0 ? (
           <>
@@ -284,7 +286,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
                 onClick={handleDelete}
                 disabled={isDeleting}
                 className="absolute top-3 right-3 z-20 bg-red-500 hover:bg-red-600 text-white p-2.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-all duration-300 transform hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Delete photo"
+                title={t('delete_photo_title')}
               >
                 {isDeleting ? (
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -398,7 +400,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
             <span className="text-xs font-medium">{photo.date}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-stone-400">by</span>
+            <span className="text-xs text-stone-400">{t('posted_by')}</span>
             <span className="text-xs font-bold text-teal-600 bg-teal-50 px-2 py-0.5 rounded-full">
               {photo.author}
             </span>
