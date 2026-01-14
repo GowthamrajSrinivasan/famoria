@@ -92,7 +92,14 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
             </div>
 
             {/* User Section (Bottom) */}
-            <div className="p-4 border-t border-white/10 bg-black/20">
+            <div className="p-4 border-t border-white/10 bg-black/20 flex flex-col gap-3">
+
+                {/* Language Switcher (Moved Above) */}
+                <div className={`flex ${isCollapsed ? 'justify-center' : 'justify-start'}`}>
+                    <LanguageSwitcher variant="ghost" direction="up" />
+                </div>
+
+                {/* User Profile */}
                 <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'}`}>
                     <img
                         src={currentUser?.avatar || 'https://api.dicebear.com/9.x/avataaars/svg?seed=fallback'}
@@ -108,16 +115,13 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
                     )}
 
                     {!isCollapsed && (
-                        <>
-                            <LanguageSwitcher variant="ghost" direction="up" />
-                            <button
-                                onClick={onSignOut}
-                                className="text-white/50 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
-                                title={t('sign_out')}
-                            >
-                                <LogOut size={16} />
-                            </button>
-                        </>
+                        <button
+                            onClick={onSignOut}
+                            className="text-white/50 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
+                            title={t('sign_out')}
+                        >
+                            <LogOut size={16} />
+                        </button>
                     )}
                 </div>
             </div>

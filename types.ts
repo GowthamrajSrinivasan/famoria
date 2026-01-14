@@ -26,6 +26,7 @@ export interface Photo {
   aiTags?: string[]; // AI-generated tags
   analysis?: Record<string, any>; // AI analysis data
   aiProcessed?: boolean;
+  location?: string;
 }
 
 export interface Post {
@@ -43,6 +44,7 @@ export interface Post {
   likes?: string[];
   commentsCount?: number;
   uploadStatus?: 'uploading' | 'complete'; // Track upload state for background uploads
+  location?: string;
 }
 
 export interface User {

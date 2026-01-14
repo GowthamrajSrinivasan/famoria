@@ -50,13 +50,22 @@ export async function decryptFile(
     const iv = combined.slice(0, 12);
     const data = combined.slice(12);
 
-    const decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: iv as unknown as BufferSource },
-        key,
-        data as unknown as BufferSource
-    );
+    console.log(`[photoCrypto] Decrypting file: IV len=${iv.length}, Data len=${data.length}, Key len=${keyBytes.length}`);
 
-    return new Blob([decrypted]); // Type unknown?
+    try {
+        const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: iv as unknown as BufferSource },
+            key,
+            data as unknown as BufferSource
+        );
+
+        return new Blob([decrypted]);
+    } catch (error) {
+        console.error(`[photoCrypto] Decryption failed!`, error);
+        console.log(`[photoCrypto] IV (hex):`, Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join(''));
+        console.log(`[photoCrypto] First 4 bytes of data (hex):`, Array.from(data.slice(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(''));
+        throw error;
+    }
 }
 
 // For Metadata, we might store IV/Tag separate to keep JSON clean?

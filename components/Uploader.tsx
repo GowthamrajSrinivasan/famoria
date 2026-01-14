@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Upload, X, Image as ImageIcon, Sparkles, Check, Wand2, ChevronDown, GripVertical, Trash2, Plus } from 'lucide-react';
+import { Upload, X, Image as ImageIcon, Sparkles, Check, Wand2, ChevronDown, GripVertical, Trash2, Plus, Calendar } from 'lucide-react';
 import { Button } from './Button';
 import { analyzeImage, analyzeMultipleImages } from '../services/geminiService';
 import { storageService } from '../services/storageService';
@@ -74,6 +74,10 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
   const [newAlbumDescription, setNewAlbumDescription] = useState('');
   const [newAlbumPrivacy, setNewAlbumPrivacy] = useState<'private' | 'family' | 'public'>('family');
   const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
+
+  // Additional Metadata State
+  const [location, setLocation] = useState('');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     if (!user) return;
@@ -322,7 +326,9 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
         familyKey,
         {
           caption: analysis.caption,
-          tags: analysis.tags
+          tags: analysis.tags,
+          date: selectedDate,
+          location: location
         },
         user
       );
@@ -510,6 +516,42 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
                                 </button>
                               </span>
                             ))}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div>
+                            <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-2">Location</label>
+                            <div className="relative">
+                              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-stone-400">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                              </div>
+                              <input
+                                type="text"
+                                value={location}
+                                onChange={(e) => setLocation(e.target.value)}
+                                placeholder="Add location..."
+                                className="w-full bg-stone-50 border border-stone-200 text-stone-700 py-3 pl-10 pr-4 rounded-xl focus:ring-2 focus:ring-orange-200 focus:border-orange-300 transition-all font-semibold text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-400 mb-2">Date</label>
+                            <div className="relative">
+                              <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-stone-400">
+                                <Calendar size={16} />
+                              </div>
+                              <input
+                                type="date"
+                                value={selectedDate}
+                                onChange={(e) => setSelectedDate(e.target.value)}
+                                className="w-full bg-stone-50 border border-stone-200 text-stone-700 py-3 pl-10 pr-4 rounded-xl focus:ring-2 focus:ring-orange-200 focus:border-orange-300 transition-all font-semibold text-sm appearance-none"
+                              />
+                            </div>
                           </div>
                         </div>
 

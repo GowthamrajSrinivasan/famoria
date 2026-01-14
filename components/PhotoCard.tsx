@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Post, Photo, User } from '../types';
-import { MessageCircle, Calendar, Lock, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { MessageCircle, Calendar, Lock, ChevronLeft, ChevronRight, Trash2, MapPin } from 'lucide-react';
 import { LikeButton } from './LikeButton';
 import { useAuth } from '../context/AuthContext';
 import { cacheService } from '../services/cacheService';
@@ -40,12 +40,15 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
   const post = isPost(photo) ? photo : null;
   const photoCount = post ? post.photoIds.length : 1;
 
-  // Debug logging
+  // Debug logging - EXPANDED
   console.log(`[PhotoCard] Rendering item ${photo.id}:`, {
     isPost: !!post,
     photoIds: post?.photoIds,
     photoCount,
-    caption: photo.caption
+    caption: photo.caption,
+    isEncrypted: photo.isEncrypted, // CHECK THIS
+    albumId: photo.albumId,         // CHECK THIS
+    hasFamilyKey: !!familyKey       // CHECK THIS
   });
 
   useEffect(() => {
@@ -57,6 +60,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
     // Handle non-encrypted or non-post items
     if (!photo.isEncrypted || !photo.albumId) {
+      console.log(`[PhotoCard] Skipping decryption: isEncrypted=${photo.isEncrypted}, albumId=${photo.albumId}`);
       if ('url' in photo) {
         setDisplayUrls([photo.url || '']);
       }
@@ -65,18 +69,20 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
     // Check if we have access to the album
     // Check if we have the Family Master Key
-    // const { familyKey } = useAuth(); // REMOVED - Invalid Hook Call
 
     // Legacy support: if family key missing, check for direct album key (migration phase)
     // But primarily use familyKey.
     const albumKey = familyKey;
 
     if (!albumKey) {
+      console.warn(`[PhotoCard] Locked: Missing Family Key for ${photo.id}`);
       if (photo.isEncrypted) {
         setIsLocked(true);
       }
       return;
     }
+
+    console.log(`[PhotoCard] Has Key, proceeding to decrypt ${photo.id}`);
 
     // Decrypt photos
     const decryptPhotos = async () => {
@@ -133,7 +139,18 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
               const downloadStartTime = performance.now();
               const encryptedBlob = await storageService.downloadBlob(pathToLoad);
               const downloadEndTime = performance.now();
-              console.log(`[PhotoCard] 📥 [${index + 1}/${postPhotos.length}] Download: ${(downloadEndTime - downloadStartTime).toFixed(2)}ms | Size: ${(encryptedBlob.size / 1024).toFixed(2)}KB`);
+              console.log(`[PhotoCard] 📥 [${index + 1}/${postPhotos.length}] Download: ${(downloadEndTime - downloadStartTime).toFixed(2)}ms | Size: ${encryptedBlob.size} bytes`);
+
+              if (encryptedBlob.size < 28) { // 12 bytes IV + 16 bytes Tag = 28 bytes minimum overhead
+                console.error(`[PhotoCard] ❌ [${index + 1}/${postPhotos.length}] Blob too small (${encryptedBlob.size} bytes). Corrupted?`);
+                return null;
+              }
+
+              // Peek at header to check for obvious HTML/XML (invalid response)
+              const headerBuffer = await encryptedBlob.slice(0, 4).arrayBuffer();
+              const headerArr = new Uint8Array(headerBuffer);
+              const headerHex = Array.from(headerArr).map(b => b.toString(16).padStart(2, '0')).join('');
+              console.log(`[PhotoCard] 🔍 [${index + 1}/${postPhotos.length}] Blob Header: ${headerHex}`);
 
               // Decrypt
               const decryptStartTime = performance.now();
@@ -409,9 +426,17 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
         </div>
 
         <div className="flex items-center justify-between pt-4 border-t border-stone-50">
-          <div className="flex items-center gap-1.5 text-stone-400">
-            <Calendar size={12} />
-            <span className="text-xs font-medium">{photo.date}</span>
+          <div className="flex flex-col gap-1 text-stone-400">
+            <div className="flex items-center gap-1.5">
+              <Calendar size={12} />
+              <span className="text-xs font-medium">{photo.date}</span>
+            </div>
+            {photo.location && (
+              <div className="flex items-center gap-1.5">
+                <MapPin size={12} />
+                <span className="text-xs font-medium truncate max-w-[150px]">{photo.location}</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-stone-400">{t('posted_by')}</span>

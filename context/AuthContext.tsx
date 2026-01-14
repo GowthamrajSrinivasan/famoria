@@ -56,11 +56,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       // Clear from IDB (Secure Logout)
-      await deleteFamilyKey();
+      // UPDATED: We do NOT delete the key from IDB anymore.
+      // This ensures trusted devices remain trusted across sessions.
+      // await deleteFamilyKey(); 
 
       // Clear all decrypted cache for security
       // We catch this specifically to avoid blocking if cache clearing fails
       await cacheService.clearAllCache().catch(e => console.error('Cache clear failed:', e));
+      console.log('[AuthContext] Family locked (memory cleared, key persists in IDB)');;
     } catch (e) {
       console.error('Error during family lock:', e);
     }

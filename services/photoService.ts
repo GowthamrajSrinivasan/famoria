@@ -1,18 +1,5 @@
 import { db } from '../lib/firebase';
-import {
-  collection,
-  addDoc,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  Timestamp,
-  doc,
-  updateDoc,
-  serverTimestamp,
-  deleteDoc,
-  getDocs
-} from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, onSnapshot, limit, addDoc, doc, updateDoc, deleteDoc, getDoc, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
 import { Photo, Post } from '../types';
 import { storageService } from './storageService';
 
@@ -212,13 +199,21 @@ export const photoService = {
         createdAt: serverTimestamp()
       };
 
-      const docRef = await addDoc(
-        collection(db, 'albums', albumId, 'photos'),
-        photoData
-      );
-
-      createdPhotos.push({ ...photoDataArray[i], id: docRef.id });
-      console.log(`[PhotoService] Photo ${i + 1}/${photoDataArray.length} added: ${docRef.id}`);
+      // Ensure we use the provided ID if available (ID consistency for encryption)
+      if (photoData.id) {
+        const docRef = doc(db, 'albums', albumId, 'photos', photoData.id);
+        await setDoc(docRef, photoData);
+        createdPhotos.push({ ...photoData, id: photoData.id });
+        console.log(`[PhotoService] Photo ${i + 1}/${photoDataArray.length} set with explicit ID: ${photoData.id}`);
+      } else {
+        // Fallback to auto-ID (shouldn't happen for encrypted flows usually)
+        const docRef = await addDoc(
+          collection(db, 'albums', albumId, 'photos'),
+          photoData
+        );
+        createdPhotos.push({ ...photoData, id: docRef.id });
+        console.log(`[PhotoService] Photo ${i + 1}/${photoDataArray.length} added with auto ID: ${docRef.id}`);
+      }
     }
 
     return createdPhotos;
@@ -268,10 +263,22 @@ export const photoService = {
     );
 
     const snapshot = await getDocs(q);
-    const photos = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const photos = snapshot.docs.map(doc => {
+      const data = doc.data();
+      // PRIORITY: Use ID from data (UUID) over Document ID if present
+      const resolvedId = data.id || doc.id;
+
+      if (data.id && data.id !== doc.id) {
+        console.warn(`[PhotoService] ID Mismatch for photo! DocID: ${doc.id} vs DataID: ${data.id}. Using DataID.`);
+      }
+
+      return {
+        id: resolvedId,
+        ...data,
+        // Ensure we pass the document ID too in case it's needed for updates
+        _docId: doc.id
+      };
+    });
 
     console.log(`[PhotoService] Retrieved ${photos.length} photos for post ${postId}`);
     return photos;

@@ -63,6 +63,35 @@ export const FamilySetupModal: React.FC = () => {
         }
     };
 
+    const handleSyncFromDrive = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            // 1. Force refresh token to ensure we have Drive scope
+            // We need to be sure we can access AppData
+            const token = await refreshDriveToken();
+            if (!token) {
+                throw new Error("Google Drive access required.");
+            }
+
+            // 2. Attempt restore
+            const key = await familyService.restoreKeyFromDrive(token);
+
+            if (key) {
+                // Success! Reload to allow AuthContext to init normally
+                // (Since key is now in IDB)
+                window.location.reload();
+            } else {
+                throw new Error("No Family Key found in your Google Drive.");
+            }
+        } catch (err: any) {
+            console.error('Sync failed:', err);
+            setError(err.message || t('sync_failed'));
+        } finally {
+            setLoading(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="fixed inset-0 z-[60] flex items-center justify-center bg-stone-900/90 backdrop-blur-md p-4">
@@ -123,6 +152,19 @@ export const FamilySetupModal: React.FC = () => {
                                 <div>
                                     <h3 className="font-bold text-stone-800">{t('enter_recovery_key')}</h3>
                                     <p className="text-xs text-stone-500 mt-1">{t('recover_family_desc')}</p>
+                                </div>
+                            </button>
+
+                            <button
+                                onClick={handleSyncFromDrive}
+                                className="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-stone-100 hover:border-green-200 hover:bg-green-50 transition-all group text-left"
+                            >
+                                <div className="bg-green-100 text-green-600 p-3 rounded-xl group-hover:scale-110 transition-transform">
+                                    <RefreshCw size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-stone-800">{t('sync_from_drive')}</h3>
+                                    <p className="text-xs text-stone-500 mt-1">{t('sync_drive_desc')}</p>
                                 </div>
                             </button>
 

@@ -15,6 +15,9 @@
     "shared_moments_count": "You have <1>{{count}}</1> shared moments",
     "add_memory": "Add New Memory",
     "welcome_user": "Welcome, {{name}}",
+    "welcome_famoria": "Welcome to Famoria",
+    "start_creating_memories": "Start creating memories",
+    "untitled_memory": "Untitled Memory",
     "sort_by": "Sort by:",
     "sort_newest": "Newest First",
     "sort_oldest": "Oldest First",
@@ -286,5 +289,10 @@
     "unlock_vault": "Unlock Vault",
     "invalid_recovery_key": "Invalid Recovery Key",
     "setting_up_vault": "Setting up Family Vault...",
-    "please_wait_encryption": "Generating keys and securing your environment. This may take a moment."
+    "please_wait_encryption": "Generating keys and securing your environment. This may take a moment.",
+    "sync_from_drive": "Sync from Google Drive",
+    "sync_drive_desc": "Restore your existing Family Key from Google Drive backup.",
+    "syncing_drive": "Syncing from Drive...",
+    "sync_success": "Family Key synced successfully!",
+    "sync_failed": "Failed to sync. Make sure you have a backup."
 }

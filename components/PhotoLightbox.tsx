@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2, Loader2, ChevronLeft, ChevronRight, Edit2, MessageCircle } from 'lucide-react';
+import { X, Calendar, Share2, MoreVertical, Sparkles, Trash2, Loader2, ChevronLeft, ChevronRight, Edit2, MessageCircle, MapPin } from 'lucide-react';
 import { Photo, Post, User } from '../types';
 import { CommentSection } from './CommentSection';
 import { LikeButton } from './LikeButton';
@@ -306,13 +306,21 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                 />
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-stone-800 truncate">{photo.author}</p>
-                  <p className="text-xs text-stone-400">
-                    {new Date(photo.date).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric'
-                    })}
-                  </p>
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-xs text-stone-400">
+                      {new Date(photo.date).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </p>
+                    {photo.location && (
+                      <p className="text-xs text-stone-400 flex items-center gap-1">
+                        <MapPin size={10} />
+                        {photo.location}
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 {/* More Options Menu */}

@@ -20,11 +20,13 @@ export interface UploadTask {
     postId?: string;
     caption: string;
     tags: string[];
+    date?: string;
+    location?: string;
 }
 
 interface UploadContextType {
     tasks: UploadTask[];
-    addUploads: (files: File[], albumId: string, albumKey: Uint8Array, metadata: { caption: string; tags: string[] }, user: any) => Promise<void>;
+    addUploads: (files: File[], albumId: string, albumKey: Uint8Array, metadata: { caption: string; tags: string[]; date?: string; location?: string }, user: any) => Promise<void>;
     cancelUpload: (taskId: string) => void;
     retryUpload: (taskId: string) => void;
     clearCompleted: () => void;
@@ -74,7 +76,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const metadata = {
                 caption: task.caption,
                 tags: task.tags,
-                date: new Date().toISOString(),
+                date: task.date || new Date().toISOString(),
+                location: task.location || "",
                 author: user.name,
                 authorId: user.id
             };
@@ -99,7 +102,8 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 albumId: task.albumId,
                 caption: task.caption,
                 tags: task.tags,
-                date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                date: task.date ? new Date(task.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+                location: task.location || "",
                 author: user.name,
                 authorId: user.id,
                 photoIds: [],
@@ -176,7 +180,7 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         files: File[],
         albumId: string,
         albumKey: Uint8Array,
-        metadata: { caption: string; tags: string[] },
+        metadata: { caption: string; tags: string[]; date?: string; location?: string },
         user: any
     ) => {
         console.log(`[Upload] 📋 Queueing ${files.length} uploads`);
@@ -196,7 +200,9 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     status: 'encrypting' as const,
                     progress: 0,
                     caption: index === 0 ? metadata.caption : '',
-                    tags: metadata.tags
+                    tags: metadata.tags,
+                    date: metadata.date,
+                    location: metadata.location
                 };
             })
         );
