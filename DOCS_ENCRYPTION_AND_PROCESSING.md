@@ -13,6 +13,9 @@ Famoria uses a hierarchical key model to ensure that even if Firestore is compro
     - **Local**: Stored in IndexedDB (Persistence across sessions on trusted devices).
     - **Sync/Backup**: Encrypted and stored in the user's **Google Drive AppData folder** (invisible to the user, accessible only by the Famoria app).
 - **Security**: This key *never* leaves the device in an unencrypted state (except to Drive AppData). It is the source of all security.
+- **Persistence Rules**: 
+    - **Never delete on logout**: Sign-out clears the in-memory key but preserves the local storage key. This ensures "Trusted Devices" remain trusted.
+    - **Manual Deletion Recovery**: If a user clears their browser/app data, they can simply log back in and the app will auto-restore the key from Google Drive AppData.
 
 ### B. Photo-Specific Key
 - **What**: Every single photo/video has its own unique 256-bit key.
@@ -31,8 +34,13 @@ The goal is to provide a "locked/unlocked" state for the Vault.
 2.  **Restore from Drive**: If not in local storage, prompt/auto-fetch from Google Drive AppData.
 3.  **Authentication**: Once retrieved, the `AuthContext` holds the FMK in memory as a `Uint8Array`.
 
+### Availability & Re-entry:
+- **Instant Re-entry**: On app launch or refresh, the app silently pulls the key from local storage.
+- **Seamless Experience**: Provided the authentication session (Google/Firebase) is valid, the user goes straight to their dashboard without ever seeing a "Locked" or "Setup" screen.
+- **Validation**: If the local key is missing, the app should proactively check Google Drive AppData before asking the user for a recovery key.
+
 > [!IMPORTANT]
-> For mobile (React Native/Expo), use `Expo SecureStore` or a similar encrypted local database instead of IndexedDB.
+> For mobile (React Native/Expo), use **`Expo SecureStore`** (iOS Keychain / Android encrypted shared preferences). Avoid `AsyncStorage` for encryption keys as it is stored in plain text.
 
 ---
 
@@ -82,17 +90,17 @@ For multi-image posts, we use a concurrency-limited worker pattern to prevent br
 
 ---
 
-## 6. Implementation Roadmap for Mobile (React Native/Expo)
+### Implementation Guide for Mobile
 
-### Cryptography Library
-Use **`expo-crypto`** or **`react-native-quick-crypto`**. Standard Web Crypto APIs may need a polyfill (`react-native-get-random-values` + `webcrypto`).
+#### Flutter (Recommended)
+- **Secure Storage**: Use [**`flutter_secure_storage`**](https://pub.dev/packages/flutter_secure_storage). It automatically uses Keychain (iOS) and Keystore (Android) for hardware-backed security of the Family Master Key.
+- **Cryptography**: Use the [**`cryptography`**](https://pub.dev/packages/cryptography) package.
+    - **Compatibility**: Its `AesGcm` implementation is 100% compatible with the Web Crypto API.
+    - **Performance**: It uses native platform-optimized cryptography (SIMD/Native) on mobile, ensuring decryption of high-res photos is nearly instant.
+- **Background Tasks**: Use `workmanager` to handle Phase 2 (full-resolution uploads) in the background so they aren't interrupted when the app is closed.
 
-### Key Storage
-- Replace IndexedDB with **`expo-secure-store`** for the Family Master Key.
-- For caching decrypted images, consider a local filesystem cache (private application directory).
-
-### Parallelism
-Javascript is single-threaded, but the `crypto` and `fetch` calls are offloaded to native threads. You can use a similar worker pattern or a library like `p-limit`.
-
-### Background Tasks
-Mobile has stricter background task limits. Ensure full-res uploads are registered as **Background Tasks** so they don't get killed if the user switches apps.
+#### React Native / Expo
+- **Secure Storage**: Use **`Expo SecureStore`** (iOS Keychain / Android encrypted shared preferences). Avoid `AsyncStorage` for encryption keys as it is stored in plain text.
+- **Cryptography**: Use **`react-native-quick-crypto`**. It is a C++ based implementation that is significantly faster than JS-based libraries for AES-GCM.
+- **Parallelism**: Use a worker-like pattern or `p-limit` to manage concurrency.
+- **Background Tasks**: Ensure full-res uploads are registered as Background Tasks so they don't get killed if the user switches apps.

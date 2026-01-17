@@ -2,6 +2,7 @@ import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy, onSnapshot, limit, addDoc, doc, updateDoc, deleteDoc, getDoc, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
 import { Photo, Post } from '../types';
 import { storageService } from './storageService';
+import { cacheService } from './cacheService';
 
 const PHOTOS_COLLECTION = 'photos';
 const POSTS_COLLECTION = 'posts';
@@ -243,6 +244,15 @@ export const photoService = {
       });
 
       console.log(`[PhotoService] Posts feed updated: ${posts.length} posts`);
+
+      // Cache latest 2 posts for landing page performance
+      if (posts.length > 0) {
+        const latestPosts = posts.slice(0, 2);
+        cacheService.setCachedMetadata('latestPosts', latestPosts).catch(err => {
+          console.error('[PhotoService] Failed to cache latest posts:', err);
+        });
+      }
+
       callback(posts);
     }, (error) => {
       console.error('Posts feed subscription error:', error);

@@ -19,8 +19,10 @@ interface AuthContextType {
   // Family Key Interface
   familyKey: Uint8Array | null;
   isFamilyAuthenticated: boolean;
+  hasLocalKey: boolean; // True if key exists in local storage
   setupFamily: () => Promise<void>;
   lockFamily: () => Promise<void>;
+  unlockFamilyLocally: () => Promise<void>; // Try to unlock with local key
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -34,8 +36,10 @@ const AuthContext = createContext<AuthContextType>({
 
   familyKey: null,
   isFamilyAuthenticated: false,
+  hasLocalKey: false,
   setupFamily: async () => { },
   lockFamily: async () => { },
+  unlockFamilyLocally: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -49,6 +53,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Family Key State
   const [familyKey, setFamilyKey] = useState<Uint8Array | null>(null);
   const [isFamilyAuthenticated, setIsFamilyAuthenticated] = useState(false);
+  const [hasLocalKey, setHasLocalKey] = useState(false);
+  const [isKeyInitialized, setIsKeyInitialized] = useState(false);
 
   const lockFamily = async () => {
     setFamilyKey(null);
@@ -131,35 +137,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // 1. Check Local IDB
       let key = await getFamilyKey();
+      setHasLocalKey(!!key);
 
       // 2. If missing, try to restore from Drive (if token available)
       if (!key && googleAccessToken) {
-        console.log('[AuthContext] Local key missing, checking Drive...');
+        console.log('[AuthContext] ☁️ Local key missing, checking Drive AppData...');
         key = await familyService.restoreKeyFromDrive(googleAccessToken);
         if (key) {
-          console.log('[AuthContext] Key restored from Drive!');
+          console.log('[AuthContext] ✅ Key successfully restored from Google Drive!');
+        } else {
+          console.warn('[AuthContext] ❌ Key NOT found in Google Drive AppData.');
         }
       }
 
       if (key) {
         setFamilyKey(key);
         setIsFamilyAuthenticated(true);
-        console.log('[AuthContext] Family Authentication Successful');
+        console.log('[AuthContext] 🔐 Family Authentication Successful');
 
         // Verify IDB persistence (Double Check)
         try {
           const inIdb = await getFamilyKey();
           if (!inIdb) {
-            console.log('[AuthContext] Key in memory but missing from IDB. Saving...');
+            console.log('[AuthContext] 💾 Key in memory but missing from IDB. Saving now...');
             await saveFamilyKey(key);
           }
         } catch (e) {
-          console.error('[AuthContext] Failed to verify IDB persistence', e);
+          console.error('[AuthContext] ❌ Failed to verify/save IDB persistence', e);
         }
       } else {
-        console.log('[AuthContext] No Family Key found. User needs to Setup or Recover.');
+        console.log('[AuthContext] 🔓 No Family Key found in IDB or Drive. Vault is locked/not setup.');
         setIsFamilyAuthenticated(false);
       }
+      setIsKeyInitialized(true);
     };
 
     initFamilyKey();
@@ -232,13 +242,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Family Key Exports
     familyKey,
     isFamilyAuthenticated,
+    hasLocalKey,
     setupFamily,
-    lockFamily
+    lockFamily,
+    unlockFamilyLocally: async () => {
+      const key = await getFamilyKey();
+      if (key) {
+        setFamilyKey(key);
+        setIsFamilyAuthenticated(true);
+        console.log('[AuthContext] 🔓 Family Unlocked using local key');
+      }
+    }
   };
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {(!loading && (isKeyInitialized || !user)) ? children : (
+        <div className="min-h-screen bg-[#fafaf9] flex flex-col items-center justify-center p-6">
+          <div className="w-16 h-16 border-4 border-orange-100 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+          <p className="text-stone-500 font-medium animate-pulse">Initializing Secure Vault...</p>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 };

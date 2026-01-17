@@ -7,7 +7,7 @@ import { toBase64 } from '../lib/crypto/masterKey';
 
 export const FamilySetupModal: React.FC = () => {
     const { t } = useTranslation();
-    const { setupFamily, user, signOut, refreshDriveToken, googleAccessToken } = useAuth();
+    const { setupFamily, user, signOut, refreshDriveToken, googleAccessToken, hasLocalKey, unlockFamilyLocally } = useAuth();
     const [mode, setMode] = useState<'selection' | 'create' | 'recover'>('selection');
     const [loading, setLoading] = useState(false);
     const [recoveryKey, setRecoveryKey] = useState('');
@@ -113,9 +113,11 @@ export const FamilySetupModal: React.FC = () => {
                     <div className="bg-white/20 backdrop-blur-sm w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl rotate-3">
                         <Shield size={40} className="text-white" />
                     </div>
-                    <h2 className="text-2xl font-bold text-white relative z-10">{t('family_vault_setup')}</h2>
+                    <h2 className="text-2xl font-bold text-white relative z-10">
+                        {hasLocalKey ? t('vault_locked') : t('family_vault_setup')}
+                    </h2>
                     <p className="text-orange-50 text-sm mt-2 relative z-10 max-w-xs mx-auto">
-                        {t('vault_setup_desc')}
+                        {hasLocalKey ? t('vault_locked_desc') : t('vault_setup_desc')}
                     </p>
                 </div>
 
@@ -129,22 +131,45 @@ export const FamilySetupModal: React.FC = () => {
 
                     {mode === 'selection' && (
                         <div className="space-y-4">
-                            <button
-                                onClick={handleCreate}
-                                className="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-stone-100 hover:border-orange-200 hover:bg-orange-50 transition-all group text-left"
-                            >
-                                <div className="bg-orange-100 text-orange-600 p-3 rounded-xl group-hover:scale-110 transition-transform">
-                                    <Plus size={24} />
+                            {hasLocalKey ? (
+                                <button
+                                    onClick={unlockFamilyLocally}
+                                    className="w-full flex items-center gap-4 p-6 rounded-2xl bg-orange-500 text-white shadow-xl shadow-orange-200 hover:bg-orange-600 hover:scale-[1.02] active:scale-95 transition-all group text-left"
+                                >
+                                    <div className="bg-white/20 p-3 rounded-xl group-hover:rotate-12 transition-transform">
+                                        <Key size={28} />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-lg">{t('unlock_vault')}</h3>
+                                        <p className="text-orange-50 text-sm opacity-90">{t('unlock_vault_desc')}</p>
+                                    </div>
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={handleCreate}
+                                    className="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-stone-100 hover:border-orange-200 hover:bg-orange-50 transition-all group text-left"
+                                >
+                                    <div className="bg-orange-100 text-orange-600 p-3 rounded-xl group-hover:scale-110 transition-transform">
+                                        <Plus size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-stone-800">{t('create_new_family')}</h3>
+                                        <p className="text-xs text-stone-500 mt-1">{t('create_family_desc')}</p>
+                                    </div>
+                                </button>
+                            )}
+
+                            {/* Divider for secondary options if already has local key */}
+                            {hasLocalKey && (
+                                <div className="relative py-4">
+                                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-stone-100" /></div>
+                                    <div className="relative flex justify-center text-xs uppercase tracking-widest text-stone-400"><span className="bg-white px-2">{t('secondary_options')}</span></div>
                                 </div>
-                                <div>
-                                    <h3 className="font-bold text-stone-800">{t('create_new_family')}</h3>
-                                    <p className="text-xs text-stone-500 mt-1">{t('create_family_desc')}</p>
-                                </div>
-                            </button>
+                            )}
 
                             <button
                                 onClick={() => setMode('recover')}
-                                className="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-stone-100 hover:border-blue-200 hover:bg-blue-50 transition-all group text-left"
+                                className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-stone-100 hover:border-blue-200 hover:bg-blue-50 transition-all group text-left ${hasLocalKey ? 'p-3' : 'p-4'}`}
                             >
                                 <div className="bg-blue-100 text-blue-600 p-3 rounded-xl group-hover:scale-110 transition-transform">
                                     <Key size={24} />
@@ -157,7 +182,7 @@ export const FamilySetupModal: React.FC = () => {
 
                             <button
                                 onClick={handleSyncFromDrive}
-                                className="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-stone-100 hover:border-green-200 hover:bg-green-50 transition-all group text-left"
+                                className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-stone-100 hover:border-green-200 hover:bg-green-50 transition-all group text-left ${hasLocalKey ? 'p-3' : 'p-4'}`}
                             >
                                 <div className="bg-green-100 text-green-600 p-3 rounded-xl group-hover:scale-110 transition-transform">
                                     <RefreshCw size={24} />

@@ -10,6 +10,9 @@ import { videoService } from '../services/videoService';
 import { Button } from './Button';
 import { VideoLightbox } from './VideoLightbox';
 import { userService } from '../services/userService';
+import * as photoCrypto from '../lib/crypto/photoCrypto';
+import * as photoKeyModule from '../lib/crypto/photoKey';
+import { useAuth } from '../context/AuthContext';
 
 interface AlbumViewProps {
     album: Album;
@@ -21,7 +24,6 @@ interface AlbumViewProps {
     onUpload: () => void;
     onUploadVideo?: () => void;
     onPhotoClick: (photo: Post) => void;
-    onInvite?: () => void;
 }
 
 export const AlbumView: React.FC<AlbumViewProps> = ({
@@ -33,8 +35,7 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     onDelete,
     onUpload,
     onUploadVideo,
-    onPhotoClick,
-    onInvite
+    onPhotoClick
 }) => {
     const { t } = useTranslation();
 
@@ -53,6 +54,33 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     const [selectedUploaders, setSelectedUploaders] = useState<string[]>([]);
     const [availableUsers, setAvailableUsers] = useState<{ id: string, name: string }[]>([]);
     const [showFilters, setShowFilters] = useState(false);
+
+    // Decrypted Album State
+    const { familyKey } = useAuth();
+    const [decryptedName, setDecryptedName] = useState(album.name);
+    const [decryptedDescription, setDecryptedDescription] = useState(album.description || '');
+
+    useEffect(() => {
+        const decryptAlbum = async () => {
+            if (familyKey && album.encryptedName) {
+                try {
+                    const metadata = await photoCrypto.decryptMetadata({
+                        encrypted: album.encryptedName,
+                        iv: album.metadataIv!,
+                        authTag: album.metadataAuthTag!
+                    }, familyKey);
+                    setDecryptedName(metadata.name);
+                    setDecryptedDescription(metadata.description);
+                } catch (err) {
+                    console.error('[AlbumView] Failed to decrypt album metadata:', err);
+                }
+            } else {
+                setDecryptedName(album.name);
+                setDecryptedDescription(album.description || '');
+            }
+        };
+        decryptAlbum();
+    }, [album, familyKey]);
 
     const isOwner = currentUserId === album.createdBy;
 
@@ -73,9 +101,33 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
         let unsubscribeVideos: (() => void) | null = null;
 
         try {
-            unsubscribePosts = photoService.subscribeToAlbumPosts(album.id, (fetchedPosts) => {
+            unsubscribePosts = photoService.subscribeToAlbumPosts(album.id, async (fetchedPosts) => {
                 if (isMounted) {
-                    setPosts(fetchedPosts);
+                    // Decrypt posts for filtering/display
+                    const decrypted = await Promise.all(fetchedPosts.map(async (post) => {
+                        if (familyKey && post.isEncrypted && (post as any).encryptedMetadata) {
+                            try {
+                                const postKey = await photoKeyModule.derivePhotoKey(familyKey, post.id);
+                                const metadata = await photoCrypto.decryptMetadata({
+                                    encrypted: (post as any).encryptedMetadata,
+                                    iv: (post as any).metadataIv,
+                                    authTag: (post as any).metadataAuthTag
+                                }, postKey);
+                                return {
+                                    ...post,
+                                    caption: metadata.caption || post.caption,
+                                    tags: metadata.tags || post.tags,
+                                    location: metadata.location || post.location
+                                };
+                            } catch (err) {
+                                console.error(`[AlbumView] Failed to decrypt post ${post.id}:`, err);
+                                return post;
+                            }
+                        }
+                        return post;
+                    }));
+
+                    setPosts(decrypted);
                     postsLoaded = true;
                     checkLoadingComplete();
                 }
@@ -220,9 +272,9 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
 
                 <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between overflow-visible">
                     <div className="flex-1">
-                        <h1 className="text-3xl font-bold text-stone-800 mb-2">{album.name}</h1>
-                        {album.description && (
-                            <p className="text-stone-600 mb-3">{album.description}</p>
+                        <h1 className="text-3xl font-bold text-stone-800 mb-2">{decryptedName}</h1>
+                        {decryptedDescription && (
+                            <p className="text-stone-600 mb-3">{decryptedDescription}</p>
                         )}
                         <div className="flex items-center gap-3 text-sm text-stone-500 overflow-visible">
                             <span className="flex items-center gap-1.5">
@@ -299,13 +351,6 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
 
                         {isOwner && (
                             <div className="flex items-center gap-2">
-                                <button
-                                    onClick={onInvite}
-                                    className="p-3 hover:bg-stone-100 rounded-xl transition-colors text-stone-600 hover:text-stone-800"
-                                    title={t('invite_members')}
-                                >
-                                    <Users size={20} />
-                                </button>
 
                                 <div className="relative">
                                     <button

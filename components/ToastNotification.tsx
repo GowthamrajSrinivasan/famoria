@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { CheckCircle, XCircle, X, Info } from 'lucide-react';
 
 export interface Toast {
@@ -75,14 +75,14 @@ const ToastItem: React.FC<{ toast: Toast; onRemove: (id: string) => void }> = ({
 export const useToast = () => {
     const [toasts, setToasts] = useState<Toast[]>([]);
 
-    const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration?: number) => {
+    const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info', duration?: number) => {
         const id = `toast-${Date.now()}-${Math.random()}`;
         setToasts(prev => [...prev, { id, message, type, duration }]);
-    };
+    }, []);
 
-    const removeToast = (id: string) => {
+    const removeToast = useCallback((id: string) => {
         setToasts(prev => prev.filter(t => t.id !== id));
-    };
+    }, []);
 
     return { toasts, addToast, removeToast };
 };

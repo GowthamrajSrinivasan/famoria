@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Camera, Plus, Search, LogOut, Grid, Image as ImageIcon, FolderOpen, Users, Film, ArrowUpDown, Filter, X, Bell } from 'lucide-react';
 import { Photo, Post, ViewState, Album } from './types';
 import { PhotoCard } from './components/PhotoCard';
@@ -15,7 +15,6 @@ import { AlbumGrid } from './components/AlbumGrid';
 import { CreateAlbumModal } from './components/CreateAlbumModal';
 import { NotificationBell } from './components/NotificationBell';
 import { AlbumView } from './components/AlbumView';
-import { useAutoLock } from './hooks/useAutoLock';
 import { MembersPage } from './components/MembersPage';
 import { VideoGrid } from './components/VideoGrid';
 import { VideoUploader } from './components/VideoUploader';
@@ -29,11 +28,13 @@ import { FamilySetupModal } from './components/FamilySetupModal';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { ImmersiveDashboard } from './components/ImmersiveDashboard';
 import { useTranslation } from 'react-i18next';
+import { cacheService } from './services/cacheService';
+import * as photoCrypto from './lib/crypto/photoCrypto';
+import * as photoKeyModule from './lib/crypto/photoKey';
 
 function ProtectedApp() {
   const { t } = useTranslation();
-  useAutoLock(); // Initialize auto-lock
-  const { user, loading, signOut, isFamilyAuthenticated, googleAccessToken } = useAuth();
+  const { user, loading, signOut, isFamilyAuthenticated, googleAccessToken, familyKey } = useAuth();
   const { toasts, addToast, removeToast } = useToast();
   // Default to Dashboard
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
@@ -59,6 +60,33 @@ function ProtectedApp() {
   const [inviteAlbumId, setInviteAlbumId] = useState<string | undefined>(undefined);
 
   const isProcessingInvite = React.useRef(false);
+
+  // Load cached data on mount for faster initial rendering
+  useEffect(() => {
+    const loadCachedData = async () => {
+      console.log('[App] Loading cached data for landing page...');
+      try {
+        const [cachedPosts, cachedAlbums] = await Promise.all([
+          cacheService.getCachedMetadata<Post[]>('latestPosts'),
+          cacheService.getCachedMetadata<Album[]>('latestAlbums')
+        ]);
+
+        if (cachedPosts && posts.length === 0) {
+          console.log(`[App] 🚀 Initializing with ${cachedPosts.length} cached posts`);
+          setPosts(cachedPosts);
+        }
+
+        if (cachedAlbums && availableAlbums.length === 0) {
+          console.log(`[App] 🚀 Initializing with ${cachedAlbums.length} cached albums`);
+          setAvailableAlbums(cachedAlbums);
+        }
+      } catch (err) {
+        console.error('[App] Failed to load cached data:', err);
+      }
+    };
+
+    loadCachedData();
+  }, []); // Only on mount
 
   // Handle Invitation Links
   useEffect(() => {
@@ -147,9 +175,33 @@ function ProtectedApp() {
     let unsubscribe: (() => void) | null = null;
 
     try {
-      unsubscribe = photoService.subscribeToPostsFeed(user.id, (newPosts) => {
+      unsubscribe = photoService.subscribeToPostsFeed(user.id, async (newPosts) => {
         if (isMounted) {
-          setPosts(newPosts);
+          // Decrypt posts
+          const decrypted = await Promise.all(newPosts.map(async (post) => {
+            if (familyKey && post.isEncrypted && (post as any).encryptedMetadata) {
+              try {
+                const postKey = await photoKeyModule.derivePhotoKey(familyKey, post.id);
+                const metadata = await photoCrypto.decryptMetadata({
+                  encrypted: (post as any).encryptedMetadata,
+                  iv: (post as any).metadataIv,
+                  authTag: (post as any).metadataAuthTag
+                }, postKey);
+                return {
+                  ...post,
+                  caption: metadata.caption || post.caption,
+                  tags: metadata.tags || post.tags,
+                  location: metadata.location || post.location
+                };
+              } catch (err) {
+                console.error(`[App] Failed to decrypt post ${post.id}:`, err);
+                return post;
+              }
+            }
+            return post;
+          }));
+
+          setPosts(decrypted);
         }
       });
     } catch (error) {
@@ -166,7 +218,7 @@ function ProtectedApp() {
         }
       }
     };
-  }, [user]);
+  }, [user, familyKey]);
 
   // Fetch users and albums for filters
   useEffect(() => {
@@ -181,8 +233,28 @@ function ProtectedApp() {
       }
     };
 
-    const unsubscribeAlbums = subscribeToAlbums(user.id, (albums) => {
-      setAvailableAlbums(albums);
+    const unsubscribeAlbums = subscribeToAlbums(user.id, async (albums) => {
+      const decrypted = await Promise.all(albums.map(async (album) => {
+        if (familyKey && album.encryptedName) {
+          try {
+            const metadata = await photoCrypto.decryptMetadata({
+              encrypted: album.encryptedName,
+              iv: album.metadataIv!,
+              authTag: album.metadataAuthTag!
+            }, familyKey);
+            return {
+              ...album,
+              name: metadata.name,
+              description: metadata.description
+            };
+          } catch (err) {
+            console.error(`[App] Failed to decrypt album ${album.id}:`, err);
+            return album;
+          }
+        }
+        return album;
+      }));
+      setAvailableAlbums(decrypted);
     });
 
     fetchFilterData();
@@ -190,7 +262,7 @@ function ProtectedApp() {
     return () => {
       unsubscribeAlbums();
     };
-  }, [user]);
+  }, [user, familyKey]);
 
   // Filter, search, and sort posts
   useEffect(() => {
@@ -241,7 +313,7 @@ function ProtectedApp() {
     setFilteredPosts(sorted);
   }, [searchQuery, posts, sortBy, selectedTags, selectedUploaders, selectedAlbums]);
 
-  const handleUploadComplete = (newPostOrPosts: Post | Post[] | Photo) => {
+  const handleUploadComplete = useCallback((newPostOrPosts: Post | Post[] | Photo) => {
     // Optimistically add post(s) to state for immediate UI feedback
     // The real-time listener will sync it properly
     setPosts(prevPosts => {
@@ -258,7 +330,7 @@ function ProtectedApp() {
       return [...validPosts, ...prevPosts];
     });
     setView(ViewState.GALLERY);
-  };
+  }, []);
 
   // Extract unique tags from posts
   const uniqueTags = Array.from(new Set(posts.flatMap(p => p.tags)));
@@ -716,10 +788,6 @@ function ProtectedApp() {
               onUpload={() => setView(ViewState.UPLOAD)}
               onUploadVideo={() => setView(ViewState.VIDEO_UPLOAD)}
               onPhotoClick={(photo) => setSelectedPhoto(photo)}
-              onInvite={() => {
-                setInviteAlbumId(selectedAlbum.id);
-                setShowInviteModal(true);
-              }}
             />
           </div>
         )}
@@ -749,7 +817,14 @@ function ProtectedApp() {
 
         {view === ViewState.MEMBERS && (
           <div className="animate-fade-in-up">
-            <MembersPage onBack={() => setView(ViewState.GALLERY)} currentUserId={user?.id} />
+            <MembersPage
+              onBack={() => setView(ViewState.GALLERY)}
+              currentUserId={user?.id}
+              onInvite={() => {
+                setInviteAlbumId(undefined);
+                setShowInviteModal(true);
+              }}
+            />
           </div>
         )}
       </main>

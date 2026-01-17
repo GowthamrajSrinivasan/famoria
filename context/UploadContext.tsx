@@ -116,6 +116,11 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             };
 
             const createdPost = await photoService.createPost(postData);
+
+            // NEW: Encrypt Post-level metadata for 100% Privacy
+            const postKey = await keyModule.derivePhotoKey(albumKey, createdPost.id);
+            const encPostMeta = await cryptoModule.encryptMetadata(metadata, postKey);
+
             const savedPhotos = await photoService.addPhotosToPost(task.albumId, createdPost.id, [encryptedPhotoRecord]);
 
             const uploadedPhotoIds = savedPhotos.map(p => p.id);
@@ -124,7 +129,15 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const postRef = doc(db, 'posts', createdPost.id);
             await updateDoc(postRef, {
                 photoIds: uploadedPhotoIds,
-                coverPhotoId: uploadedPhotoIds[0]
+                coverPhotoId: uploadedPhotoIds[0],
+                // Full Privacy Fields
+                encryptedMetadata: encPostMeta.encrypted,
+                metadataIv: encPostMeta.iv,
+                metadataAuthTag: encPostMeta.authTag,
+                // Redact plain text fields for 100% Zero-Knowledge
+                caption: '[Securely Encrypted]',
+                location: '[Securely Encrypted]',
+                tags: []
             });
 
             setTasks(prev => prev.map(t => t.id === task.id ? { ...t, postId: createdPost.id, progress: 50 } : t));

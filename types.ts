@@ -43,8 +43,12 @@ export interface Post {
   isEncrypted?: boolean;
   likes?: string[];
   commentsCount?: number;
-  uploadStatus?: 'uploading' | 'complete'; // Track upload state for background uploads
   location?: string;
+  uploadStatus?: 'uploading' | 'complete'; // Track upload state for background uploads
+  // Encrypted Metadata
+  encryptedMetadata?: string;
+  metadataIv?: string;
+  metadataAuthTag?: string;
 }
 
 export interface User {
@@ -107,6 +111,11 @@ export interface Album {
   members: string[]; // Array of user IDs who can access (if accessType is 'members', or expanded from groups)
   photoCount?: number; // Cached count of photos/posts
   videoCount?: number; // Cached count of videos
+  // Encrypted Metadata
+  encryptedName?: string;
+  encryptedDescription?: string;
+  metadataIv?: string;
+  metadataAuthTag?: string;
 }
 
 export interface UploadProgress {
@@ -143,7 +152,7 @@ export interface Invitation {
   id: string; // Token
   email: string;
   invitedBy: string; // User ID
-  albumId?: string; // Optional: if inviting to specific album
+  albumId?: string | null; // Optional: if inviting to specific album
   status: 'pending' | 'accepted' | 'expired';
   createdAt: number;
   expiresAt: number; // e.g., 7 days

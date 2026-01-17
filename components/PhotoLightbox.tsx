@@ -41,6 +41,11 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
   const [displayUrls, setDisplayUrls] = useState<string[]>([]);
   const [isDecryptingFullRes, setIsDecryptingFullRes] = useState(false);
 
+  // Decrypted Metadata State
+  const [decryptedCaption, setDecryptedCaption] = useState(photo.caption);
+  const [decryptedTags, setDecryptedTags] = useState(photo.tags || []);
+  const [decryptedLocation, setDecryptedLocation] = useState(photo.location || '');
+
   const post = isPost(photo) ? photo : null;
   const photoCount = post ? post.photoIds.length : 1;
 
@@ -68,7 +73,23 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
     const decryptImages = async () => {
       setIsDecryptingFullRes(true);
       try {
+        // NEW: Decrypt metadata if present
+        if (photo.isEncrypted && (photo as any).encryptedMetadata && familyKey) {
+          try {
+            const postKey = await photoKeyModule.derivePhotoKey(familyKey, photo.id);
+            const metadata = await photoCryptoModule.decryptMetadata({
+              encrypted: (photo as any).encryptedMetadata,
+              iv: (photo as any).metadataIv,
+              authTag: (photo as any).metadataAuthTag
+            }, postKey);
 
+            if (metadata.caption) setDecryptedCaption(metadata.caption);
+            if (metadata.tags) setDecryptedTags(metadata.tags);
+            if (metadata.location) setDecryptedLocation(metadata.location);
+          } catch (err) {
+            console.error('[PhotoLightbox] Failed to decrypt metadata:', err);
+          }
+        }
 
         if (post) {
           // Multi-image post
@@ -212,7 +233,12 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
   if (showEditModal) {
     return (
       <EditPhotoModal
-        photo={post ? { ...photo, id: post.coverPhotoId } as Photo : photo as Photo}
+        photo={{
+          ...(post ? { ...photo, id: post.coverPhotoId } as Photo : photo as Photo),
+          caption: decryptedCaption,
+          tags: decryptedTags,
+          location: decryptedLocation
+        }}
         onClose={() => setShowEditModal(false)}
         onSave={handleEditSave}
       />
@@ -314,10 +340,10 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                         year: 'numeric'
                       })}
                     </p>
-                    {photo.location && (
+                    {decryptedLocation && (
                       <p className="text-xs text-stone-400 flex items-center gap-1">
                         <MapPin size={10} />
-                        {photo.location}
+                        {decryptedLocation}
                       </p>
                     )}
                   </div>
@@ -368,12 +394,12 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
               </div>
 
               {/* Caption */}
-              <p className="text-stone-700 text-sm leading-relaxed">{photo.caption}</p>
+              <p className="text-stone-700 text-sm leading-relaxed">{decryptedCaption}</p>
 
               {/* Tags */}
-              {photo.tags && photo.tags.length > 0 && (
+              {decryptedTags && decryptedTags.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {photo.tags.map((tag, index) => (
+                  {decryptedTags.map((tag, index) => (
                     <span
                       key={index}
                       className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded-md"
@@ -392,6 +418,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                   itemType={post ? 'post' : 'photo'}
                   variant="lightbox"
                   showCount={true}
+                  fullItem={photo}
                 />
                 <button className="p-2.5 hover:bg-stone-100 text-stone-600 rounded-lg transition-colors">
                   <Share2 size={20} />
@@ -417,6 +444,7 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ photo, currentUser
                 photoId={photo.id}
                 itemType={post ? 'post' : 'photo'}
                 currentUser={currentUser}
+                fullItem={photo}
               />
             </div>
           </div>

@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { Plus, Search, FolderOpen, ArrowUpDown } from 'lucide-react';
 import { Album } from '../types';
 import { AlbumCard } from './AlbumCard';
-import { subscribeToAlbums, searchAlbums, deleteAlbum } from '../services/albumService';
+import { subscribeToAlbums, deleteAlbum } from '../services/albumService';
+import { useAuth } from '../context/AuthContext';
+import * as photoCrypto from '../lib/crypto/photoCrypto';
 
 interface AlbumGridProps {
     currentUserId?: string;
@@ -27,6 +29,8 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
+    const { familyKey } = useAuth();
+
     useEffect(() => {
         if (!currentUserId) {
             setLoading(false);
@@ -35,8 +39,30 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
 
         const unsubscribe = subscribeToAlbums(
             currentUserId,
-            (fetchedAlbums) => {
-                setAlbums(fetchedAlbums);
+            async (fetchedAlbums) => {
+                // Decrypt albums if familyKey is available
+                const decrypted = await Promise.all(fetchedAlbums.map(async (album) => {
+                    if (familyKey && album.encryptedName) {
+                        try {
+                            const metadata = await photoCrypto.decryptMetadata({
+                                encrypted: album.encryptedName,
+                                iv: album.metadataIv!,
+                                authTag: album.metadataAuthTag!
+                            }, familyKey);
+                            return {
+                                ...album,
+                                name: metadata.name,
+                                description: metadata.description
+                            };
+                        } catch (err) {
+                            console.error(`[AlbumGrid] Failed to decrypt album ${album.id}:`, err);
+                            return album;
+                        }
+                    }
+                    return album;
+                }));
+
+                setAlbums(decrypted);
                 setLoading(false);
             },
             (error) => {
@@ -46,7 +72,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
         );
 
         return () => unsubscribe();
-    }, [currentUserId]);
+    }, [currentUserId, familyKey]);
 
     // Search and sort functionality
     useEffect(() => {

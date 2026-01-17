@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/* If you have a tailwind.config.js, Tailwind v4 treats it as legacy but can still use it.
+   Alternatively, we can specify sources here. */
+
+@source "../index.html";
+@source "../App.tsx";
+@source "../index.tsx";
+@source "../components/**/*.{js,ts,jsx,tsx}";
+@source "../context/**/*.{js,ts,jsx,tsx}";
+@source "../hooks/**/*.{js,ts,jsx,tsx}";
+@source "../lib/**/*.{js,ts,jsx,tsx}";
+@source "../services/**/*.{js,ts,jsx,tsx}";
+
+@layer base {
+  body {
+    @apply antialiased;
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin 8s linear infinite;
+}

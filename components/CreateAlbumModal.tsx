@@ -32,7 +32,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
     editAlbum
 }) => {
     const { t } = useTranslation();
-    const { googleAccessToken, refreshDriveToken, unlockAlbum } = useAuth();
+    const { googleAccessToken, refreshDriveToken, unlockAlbum, familyKey } = useAuth();
     const [step, setStep] = useState<Step>('DETAILS');
 
     // Details State
@@ -207,7 +207,9 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                 const updates: any = {
                     name: name.trim(),
                     description: description.trim(),
-                    privacy
+                    privacy,
+                    members: [currentUserId, ...selectedMembers],
+                    selectedGroups
                 };
 
                 // Only update cover if changed
@@ -215,48 +217,22 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     updates.coverPhoto = coverPhotoURL;
                 }
 
-                await updateAlbum(editAlbum.id, updates);
-
-                // Update groups and members directly in Firestore
-                const albumRef = doc(db, 'albums', editAlbum.id);
-                const firestoreUpdates: any = {};
-
-                if (coverFile && coverPhotoURL) {
-                    firestoreUpdates.coverPhoto = coverPhotoURL;
-                }
-
-                firestoreUpdates.selectedGroups = selectedGroups;
-                firestoreUpdates.members = [currentUserId, ...selectedMembers];
-
-                await updateDoc(albumRef, firestoreUpdates);
+                await updateAlbum(editAlbum.id, updates, familyKey || undefined);
 
                 onSuccess(editAlbum.id);
                 onClose();
             } else {
                 // V4: Simplified Creation (Family Key Model)
-                // No individual keys generated. Just create the album doc.
-
-                const albumId = crypto.randomUUID();
-                const allMembers = [currentUserId, ...selectedMembers];
-
-                await setDoc(doc(db, 'albums', albumId), {
-                    id: albumId,
-                    name: name.trim(),
-                    description: description.trim(),
+                const albumId = await createAlbum(
+                    name.trim(),
+                    currentUserId,
+                    description.trim(),
                     privacy,
-                    createdBy: currentUserId,
-                    userId: currentUserId,
-                    members: allMembers,
-                    accessType: 'groups',
-                    selectedGroups: selectedGroups,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                    coverPhoto: coverPhotoURL,
-                    photoCount: 0,
-                    videoCount: 0,
-                    // valid: true flag to indicate new architecture? 
-                    // or maybe we don't need it if everything assumes Family Key now.
-                });
+                    selectedMembers,
+                    selectedGroups,
+                    coverPhotoURL,
+                    familyKey || undefined
+                );
 
                 onSuccess(albumId);
                 onClose();

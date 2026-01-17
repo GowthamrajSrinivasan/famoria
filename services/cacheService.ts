@@ -4,8 +4,9 @@
  */
 
 const DB_NAME = 'famoria-cache';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PHOTO_STORE = 'photos';
+const METADATA_STORE = 'metadata';
 const MAX_CACHE_SIZE = 50 * 1024 * 1024; // 50MB default limit
 
 export interface CachedPhoto {
@@ -54,6 +55,10 @@ class CacheService {
                     store.createIndex('albumId', 'albumId', { unique: false });
                     store.createIndex('lastAccessed', 'lastAccessed', { unique: false });
                     store.createIndex('size', 'size', { unique: false });
+                }
+
+                if (!db.objectStoreNames.contains(METADATA_STORE)) {
+                    db.createObjectStore(METADATA_STORE, { keyPath: 'key' });
                 }
             };
         });
@@ -162,6 +167,58 @@ class CacheService {
 
             request.onerror = () => {
                 console.error('[CacheService] Error caching photo:', request.error);
+                reject(request.error);
+            };
+        });
+    }
+
+    /**
+     * Get generic metadata from cache
+     */
+    async getCachedMetadata<T>(key: string): Promise<T | null> {
+        const db = await this.ensureDB();
+
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction([METADATA_STORE], 'readonly');
+            const store = transaction.objectStore(METADATA_STORE);
+            const request = store.get(key);
+
+            request.onsuccess = () => {
+                const result = request.result;
+                if (result) {
+                    console.log(`[CacheService] Metadata hit for key: ${key}`);
+                    resolve(result.data as T);
+                } else {
+                    console.log(`[CacheService] Metadata miss for key: ${key}`);
+                    resolve(null);
+                }
+            };
+
+            request.onerror = () => {
+                console.error('[CacheService] Error getting metadata:', request.error);
+                resolve(null);
+            };
+        });
+    }
+
+    /**
+     * Set generic metadata in cache
+     */
+    async setCachedMetadata(key: string, data: any): Promise<void> {
+        const db = await this.ensureDB();
+
+        return new Promise((resolve, reject) => {
+            const transaction = db.transaction([METADATA_STORE], 'readwrite');
+            const store = transaction.objectStore(METADATA_STORE);
+            const request = store.put({ key, data, updatedAt: Date.now() });
+
+            request.onsuccess = () => {
+                console.log(`[CacheService] Metadata cached for key: ${key}`);
+                resolve();
+            };
+
+            request.onerror = () => {
+                console.error('[CacheService] Error setting metadata:', request.error);
                 reject(request.error);
             };
         });

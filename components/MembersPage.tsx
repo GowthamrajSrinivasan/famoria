@@ -9,9 +9,10 @@ import { CreateGroupModal } from './CreateGroupModal';
 interface MembersPageProps {
     onBack: () => void;
     currentUserId?: string;
+    onInvite?: () => void;
 }
 
-export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId }) => {
+export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId, onInvite }) => {
     const { t } = useTranslation();
     const [activeTab, setActiveTab] = useState<'members' | 'groups'>('members');
     const [members, setMembers] = useState<User[]>([]);
@@ -130,7 +131,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                         </div>
                     </div>
 
-                    {activeTab === 'groups' && (
+                    {activeTab === 'groups' ? (
                         <button
                             onClick={() => {
                                 setEditGroup(null);
@@ -140,6 +141,14 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId 
                         >
                             <Plus size={20} />
                             {t('create_group')}
+                        </button>
+                    ) : (
+                        <button
+                            onClick={onInvite}
+                            className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 flex items-center gap-2 font-medium"
+                        >
+                            <Plus size={20} />
+                            {t('add_new_member')}
                         </button>
                     )}
                 </div>

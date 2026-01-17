@@ -12,6 +12,7 @@ interface LikeButtonProps {
   showCount?: boolean;
   variant?: 'card' | 'lightbox';
   itemType?: 'photo' | 'video' | 'post'; // Added 'post' type
+  fullItem?: any;
 }
 
 export const LikeButton: React.FC<LikeButtonProps> = ({
@@ -19,11 +20,12 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
   currentUserId,
   showCount = true,
   variant = 'card',
-  itemType = 'photo'
+  itemType = 'photo',
+  fullItem
 }) => {
   // Map itemType to Firestore collection name
   const collectionName = itemType === 'video' ? 'videos' : itemType === 'post' ? 'posts' : 'photos';
-  const { likes, isLiked, toggleLike, isAnimating } = useLikes(photoId, currentUserId, collectionName);
+  const { likes, isLiked, toggleLike, isAnimating } = useLikes(photoId, currentUserId, collectionName, fullItem);
   const [showTooltip, setShowTooltip] = useState(false);
   const [likerNames, setLikerNames] = useState<string[]>([]);
   const [showLikesModal, setShowLikesModal] = useState(false);
@@ -107,8 +109,8 @@ export const LikeButton: React.FC<LikeButtonProps> = ({
             size={variant === 'lightbox' ? 20 : 18}
             fill={isLiked ? "currentColor" : "none"}
             className={`transition-all duration-200 ${variant === 'lightbox'
-                ? (isLiked ? "text-red-500" : "text-stone-500")
-                : (isLiked ? "text-red-500 scale-110" : "text-white/90")
+              ? (isLiked ? "text-red-500" : "text-stone-500")
+              : (isLiked ? "text-red-500 scale-110" : "text-white/90")
               }`}
           />
           {showCount && likes.length > 0 && (

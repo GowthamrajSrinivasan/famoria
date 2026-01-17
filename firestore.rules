@@ -220,6 +220,14 @@ service cloud.firestore {
                        request.auth.uid == resource.data.userId;
     }
 
+    // Invitations - anyone can read by token to validate, only auth users can create/accept
+    match /invitations/{token} {
+      allow read: if true; 
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && 
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+    }
+
     // Notifications - users can read/delete their own notifications
     match /notifications/{notificationId} {
       // Allow read if the notification belongs to the user

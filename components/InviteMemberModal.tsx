@@ -18,7 +18,12 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
     const [inviteLink, setInviteLink] = useState('');
     const [copied, setCopied] = useState(false);
 
-    const handleShareWhatsapp = async () => {
+    // Auto-generate link on mount
+    React.useEffect(() => {
+        generateLink();
+    }, []);
+
+    const generateLink = async () => {
         setLoading(true);
         setError('');
 
@@ -30,22 +35,14 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
             }
             const keyBase64 = toBase64(familyKey);
 
-            if (!albumId) throw new Error("Please select an album to invite to.");
-
-
-            // 2. Create Invite Record (No email needed)
+            // 2. Create Invite Record
+            // albumId is now optional for app-level invite
             const token = await invitationService.createInvitation(currUserId, keyBase64, albumId);
 
             // 3. Construct Invite Link
             const baseUrl = window.location.origin;
-            // The key is in the Hash Fragment #key=...
             const link = `${baseUrl}/?invite=${token}#key=${keyBase64}`;
             setInviteLink(link);
-
-            // 4. Open WhatsApp
-            const message = `Join my private album on Famoria: ${link}`;
-            const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
-            window.open(whatsappUrl, '_blank');
 
         } catch (err: any) {
             console.error(err);
@@ -55,7 +52,15 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
         }
     };
 
+    const handleShareWhatsapp = () => {
+        if (!inviteLink) return;
+        const message = t('invite_app_message', { link: inviteLink });
+        const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+        window.open(whatsappUrl, '_blank');
+    };
+
     const copyLink = () => {
+        if (!inviteLink) return;
         navigator.clipboard.writeText(inviteLink);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -76,75 +81,85 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
                 </div>
 
                 <div className="p-6">
-                    {/* Main Action or Result */}
-                    {!inviteLink ? (
-                        <div className="space-y-4">
-                            <p className="text-stone-600 text-sm">
-                                {t('invite_desc')}
-                            </p>
+                    <div className="space-y-6">
+                        <p className="text-stone-600 text-sm">
+                            {t('invite_desc')}
+                        </p>
 
-                            {error && (
-                                <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center gap-2">
-                                    <X size={16} />
-                                    {error}
+                        {error && (
+                            <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center gap-2">
+                                <X size={16} />
+                                {error}
+                            </div>
+                        )}
+
+                        {loading ? (
+                            <div className="flex flex-col items-center justify-center py-8 gap-3">
+                                <div className="w-10 h-10 border-4 border-stone-100 border-t-orange-500 rounded-full animate-spin" />
+                                <p className="text-stone-400 text-sm font-medium">{t('generating_link') || 'Generating link...'}</p>
+                            </div>
+                        ) : inviteLink ? (
+                            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+                                {/* Link Preview Box */}
+                                <div className="bg-stone-50 p-4 rounded-xl border border-stone-100">
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            readOnly
+                                            value={inviteLink}
+                                            className="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-600 outline-none"
+                                        />
+                                        <button
+                                            onClick={copyLink}
+                                            className="p-2 hover:bg-stone-200 rounded-lg transition-colors text-stone-600"
+                                            title={t('copy_link')}
+                                        >
+                                            {copied ? <Check size={18} className="text-green-600" /> : <Copy size={18} />}
+                                        </button>
+                                    </div>
                                 </div>
-                            )}
 
-                            <button
-                                onClick={handleShareWhatsapp}
-                                disabled={loading}
-                                className="w-full py-3.5 bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {loading ? (
-                                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                ) : (
-                                    <>
+                                {/* Primary Actions */}
+                                <div className="grid grid-cols-1 gap-3">
+                                    <button
+                                        onClick={handleShareWhatsapp}
+                                        className="w-full py-3.5 bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold rounded-xl transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 flex items-center justify-center gap-3"
+                                    >
                                         <MessageCircle size={22} fill="white" className="text-white" />
                                         {t('share_whatsapp')}
-                                    </>
-                                )}
-                            </button>
+                                    </button>
 
-                            <p className="text-xs text-center text-stone-400">
-                                {t('whatsapp_note')}
-                            </p>
-                        </div>
-                    ) : (
-                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
-                            <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                                <Check size={32} strokeWidth={3} />
-                            </div>
-                            <h3 className="text-center text-lg font-semibold text-stone-800 mb-2">{t('link_created')}</h3>
-                            <p className="text-center text-stone-500 text-sm mb-6">
-                                {t('link_copy_help')}
-                            </p>
-
-                            <div className="bg-stone-50 p-4 rounded-xl mb-6 border border-stone-100">
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="text"
-                                        readOnly
-                                        value={inviteLink}
-                                        className="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-2 text-sm text-stone-600 outline-none"
-                                    />
                                     <button
                                         onClick={copyLink}
-                                        className="p-2 hover:bg-stone-200 rounded-lg transition-colors text-stone-600"
-                                        title="Copy Link"
+                                        className="w-full py-3.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold rounded-xl transition-all flex items-center justify-center gap-3"
                                     >
-                                        {copied ? <Check size={18} className="text-green-600" /> : <Copy size={18} />}
+                                        {copied ? (
+                                            <>
+                                                <Check size={20} className="text-green-600" />
+                                                {t('copied') || 'Copied!'}
+                                            </>
+                                        ) : (
+                                            <>
+                                                <LinkIcon size={20} />
+                                                {t('copy_link')}
+                                            </>
+                                        )}
                                     </button>
                                 </div>
-                            </div>
 
-                            <button
-                                onClick={onClose}
-                                className="w-full py-3 bg-stone-900 text-white rounded-xl font-medium hover:bg-stone-800 transition-colors"
-                            >
-                                {t('done_btn')}
-                            </button>
-                        </div>
-                    )}
+                                <p className="text-xs text-center text-stone-400 pt-2">
+                                    {t('whatsapp_note')}
+                                </p>
+                            </div>
+                        ) : null}
+
+                        <button
+                            onClick={onClose}
+                            className="w-full py-3 mt-4 bg-white border border-stone-200 text-stone-600 rounded-xl font-medium hover:bg-stone-50 transition-colors"
+                        >
+                            {t('cancel')}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -26,7 +26,7 @@ export const invitationService = {
                 id: token,
                 email: email || 'whatsapp-share', // Placeholder if not provided
                 invitedBy: invitedByUserId,
-                albumId,
+                albumId: albumId || null,
                 status: 'pending',
                 createdAt: Date.now(),
                 expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days

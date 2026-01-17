@@ -5,7 +5,7 @@ import { emailService } from '../services/emailService';
 import { userService } from '../services/userService';
 import { Comment } from '../types';
 
-export const useLikes = (photoId: string, currentUserId?: string, collectionName: string = 'photos', post?: any) => {
+export const useLikes = (photoId: string, currentUserId?: string, collectionName: string = 'posts', fullItem?: any) => {
   const [likes, setLikes] = useState<string[]>([]);
   const [isLiked, setIsLiked] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -16,7 +16,7 @@ export const useLikes = (photoId: string, currentUserId?: string, collectionName
       if (currentUserId) {
         setIsLiked(userIds.includes(currentUserId));
       }
-    }, collectionName);
+    }, collectionName as 'photos' | 'posts' | 'videos');
     return () => unsubscribe();
   }, [photoId, currentUserId, collectionName]);
 
@@ -37,16 +37,17 @@ export const useLikes = (photoId: string, currentUserId?: string, collectionName
     }
 
     try {
-      await interactionService.toggleLike(photoId, currentUserId, collectionName);
+      await interactionService.toggleLike(photoId, currentUserId, collectionName as 'photos' | 'posts' | 'videos');
 
       // Send notification for new likes (not for unlikes)
-      if (!previousIsLiked && post && post.authorId && post.authorId !== currentUserId) {
+      const recipientId = fullItem?.authorId || fullItem?.uploadedBy;
+      if (!previousIsLiked && recipientId && recipientId !== currentUserId) {
         try {
           const currentUser = await userService.getUserById(currentUserId);
 
           // Create in-app notification
           await notificationService.createNotification({
-            userId: post.authorId,
+            userId: recipientId,
             type: 'like',
             actorId: currentUserId,
             actorName: currentUser?.name || 'Someone',
@@ -58,7 +59,7 @@ export const useLikes = (photoId: string, currentUserId?: string, collectionName
           });
 
           // Send email notification
-          const owner = await userService.getUserById(post.authorId);
+          const owner = await userService.getUserById(recipientId);
           if (owner?.email) {
             await emailService.sendNotificationEmailBackground(
               owner.email,
@@ -86,7 +87,7 @@ export const useLikes = (photoId: string, currentUserId?: string, collectionName
   return { likes, isLiked, toggleLike, isAnimating };
 };
 
-export const useComments = (photoId: string, collectionName: string = 'photos', post?: any) => {
+export const useComments = (photoId: string, collectionName: string = 'posts', fullItem?: any) => {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -95,7 +96,7 @@ export const useComments = (photoId: string, collectionName: string = 'photos', 
     const unsubscribe = interactionService.subscribeToComments(photoId, (newComments) => {
       setComments(newComments);
       setLoading(false);
-    }, collectionName);
+    }, collectionName as 'photos' | 'posts');
     return () => unsubscribe();
   }, [photoId, collectionName]);
 
@@ -109,14 +110,15 @@ export const useComments = (photoId: string, collectionName: string = 'photos', 
         userName: user.name,
         userAvatar: user.avatar,
         text
-      }, collectionName);
+      }, collectionName as 'photos' | 'posts');
 
       // Send notification to post owner
-      if (post && post.authorId && post.authorId !== user.id) {
+      const recipientId = fullItem?.authorId || fullItem?.uploadedBy;
+      if (recipientId && recipientId !== user.id) {
         try {
           // Create in-app notification
           await notificationService.createNotification({
-            userId: post.authorId,
+            userId: recipientId,
             type: 'comment',
             actorId: user.id,
             actorName: user.name,
@@ -128,7 +130,7 @@ export const useComments = (photoId: string, collectionName: string = 'photos', 
           });
 
           // Send email notification
-          const owner = await userService.getUserById(post.authorId);
+          const owner = await userService.getUserById(recipientId);
           if (owner?.email) {
             await emailService.sendNotificationEmailBackground(
               owner.email,
@@ -153,7 +155,7 @@ export const useComments = (photoId: string, collectionName: string = 'photos', 
 
   const deleteComment = async (commentId: string) => {
     try {
-      await interactionService.deleteComment(photoId, commentId, collectionName);
+      await interactionService.deleteComment(photoId, commentId, collectionName as 'photos' | 'posts');
     } catch (error) {
       console.error("Failed to delete comment", error);
     }
@@ -161,7 +163,7 @@ export const useComments = (photoId: string, collectionName: string = 'photos', 
 
   const editComment = async (commentId: string, newText: string) => {
     try {
-      await interactionService.updateComment(photoId, commentId, newText, collectionName);
+      await interactionService.updateComment(photoId, commentId, newText, collectionName as 'photos' | 'posts');
     } catch (error) {
       console.error('Failed to edit comment:', error);
       throw error;
@@ -170,7 +172,7 @@ export const useComments = (photoId: string, collectionName: string = 'photos', 
 
   const toggleCommentLike = async (commentId: string, userId: string) => {
     try {
-      return await interactionService.toggleCommentLike(photoId, commentId, userId, collectionName);
+      return await interactionService.toggleCommentLike(photoId, commentId, userId, collectionName as 'photos' | 'posts');
     } catch (error) {
       console.error("Failed to toggle comment like", error);
       return false;

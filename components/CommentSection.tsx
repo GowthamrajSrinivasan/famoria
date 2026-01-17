@@ -8,17 +8,18 @@ import { EmojiPicker } from './EmojiPicker';
 interface CommentSectionProps {
   photoId?: string;
   itemId?: string;
-  itemType?: 'photo' | 'video';
+  itemType?: 'photo' | 'video' | 'post';
   currentUser: User | null;
   photoLikes?: string[];
+  fullItem?: any;
 }
 
-export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId, itemType = 'photo', currentUser, photoLikes }) => {
+export const CommentSection: React.FC<CommentSectionProps> = ({ photoId, itemId, itemType = 'photo', currentUser, photoLikes, fullItem }) => {
   const { t } = useTranslation();
   const actualItemId = itemId || photoId || '';
   // Map itemType to collection name: 'photo' -> 'photos', 'post' -> 'posts', 'video' -> 'videos'
   const collectionName = itemType === 'video' ? 'videos' : itemType === 'post' ? 'posts' : 'photos';
-  const { comments, loading, addComment, deleteComment, editComment, toggleCommentLike } = useComments(actualItemId, collectionName);
+  const { comments, loading, addComment, deleteComment, editComment, toggleCommentLike } = useComments(actualItemId, collectionName as 'photos' | 'posts', fullItem);
   const [newComment, setNewComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);

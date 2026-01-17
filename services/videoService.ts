@@ -11,7 +11,9 @@ import {
     onSnapshot,
     Timestamp,
     increment,
-    getDocs
+    getDocs,
+    arrayUnion,
+    arrayRemove
 } from 'firebase/firestore';
 import {
     ref,
@@ -254,20 +256,22 @@ export const videoService = {
      */
     toggleLike: async (videoId: string, userId: string): Promise<void> => {
         const videoRef = doc(db, VIDEOS_COLLECTION, videoId);
-        const video = await videoService.getVideo(videoId);
+        const snapshot = await videoService.getVideo(videoId);
 
-        if (!video) throw new Error('Video not found');
+        if (!snapshot) throw new Error('Video not found');
 
-        const likes = video.likes || [];
+        const likes = snapshot.likes || [];
         const isLiked = likes.includes(userId);
 
-        const updatedLikes = isLiked
-            ? likes.filter(id => id !== userId)
-            : [...likes, userId];
-
-        await updateDoc(videoRef, {
-            likes: updatedLikes
-        });
+        if (isLiked) {
+            await updateDoc(videoRef, {
+                likes: arrayRemove(userId)
+            });
+        } else {
+            await updateDoc(videoRef, {
+                likes: arrayUnion(userId)
+            });
+        }
     },
 
     /**

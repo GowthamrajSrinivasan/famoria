@@ -37,6 +37,12 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
   const [albumName, setAlbumName] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Decrypted Metadata State
+  const [decryptedCaption, setDecryptedCaption] = useState(photo.caption);
+  const [decryptedTags, setDecryptedTags] = useState(photo.tags || []);
+  const [decryptedLocation, setDecryptedLocation] = useState(photo.location || '');
+  const [decryptedAlbumName, setDecryptedAlbumName] = useState<string | null>(null);
+
   const post = isPost(photo) ? photo : null;
   const photoCount = post ? post.photoIds.length : 1;
 
@@ -90,6 +96,24 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
       const overallStartTime = performance.now();
 
       try {
+        // NEW: Decrypt Post-level metadata if present
+        if (photo.isEncrypted && (photo as any).encryptedMetadata && familyKey) {
+          try {
+            const postKey = await photoKeyModule.derivePhotoKey(familyKey, photo.id);
+            const metadata = await photoCryptoModule.decryptMetadata({
+              encrypted: (photo as any).encryptedMetadata,
+              iv: (photo as any).metadataIv,
+              authTag: (photo as any).metadataAuthTag
+            }, postKey);
+
+            if (metadata.caption) setDecryptedCaption(metadata.caption);
+            if (metadata.tags) setDecryptedTags(metadata.tags);
+            if (metadata.location) setDecryptedLocation(metadata.location);
+          } catch (err) {
+            console.error('[PhotoCard] Failed to decrypt post metadata:', err);
+          }
+        }
+
         if (post) {
           // Multi-image post - decrypt all photos in parallel
           console.log(`[PhotoCard] 🔓 Starting decryption for post ${post.id} with ${post.photoIds.length} photos`);
@@ -247,7 +271,22 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
         const albumSnap = await getDoc(albumRef);
 
         if (albumSnap.exists()) {
-          setAlbumName(albumSnap.data().name);
+          const data = albumSnap.data();
+          if (familyKey && data.encryptedName) {
+            try {
+              const albumMeta = await photoCryptoModule.decryptMetadata({
+                encrypted: data.encryptedName,
+                iv: data.metadataIv,
+                authTag: data.metadataAuthTag
+              }, familyKey);
+              setDecryptedAlbumName(albumMeta.name);
+            } catch (err) {
+              console.error('[PhotoCard] Failed to decrypt album name:', err);
+              setDecryptedAlbumName(data.name); // Fallback
+            }
+          } else {
+            setDecryptedAlbumName(data.name);
+          }
         }
       } catch (error: any) {
         // Silently handle permission errors - user may not have access to album details
@@ -387,6 +426,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
                 photoId={photo.id}
                 currentUserId={currentUser?.id}
                 itemType={post ? 'post' : 'photo'}
+                fullItem={photo}
               />
               <button
                 className="bg-white/20 hover:bg-white/40 backdrop-blur-sm p-2 rounded-full text-white transition-all transform hover:scale-110"
@@ -404,21 +444,21 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
       <div className="p-5">
         <p className="text-stone-800 font-medium text-[15px] leading-relaxed mb-4 line-clamp-2">
-          {photo.caption}
+          {decryptedCaption}
         </p>
 
         <div className="flex flex-wrap gap-2 mb-5">
           {/* Album name with distinct styling */}
-          {albumName && (
+          {decryptedAlbumName && (
             <span className="px-2.5 py-1 rounded-md bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 text-xs font-bold tracking-wide border border-blue-200 flex items-center gap-1">
               <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
               </svg>
-              {albumName}
+              {decryptedAlbumName}
             </span>
           )}
           {/* Regular tags */}
-          {(photo.tags || []).slice(0, 3).map((tag, idx) => (
+          {(decryptedTags || []).slice(0, 3).map((tag, idx) => (
             <span key={idx} className="px-2.5 py-1 rounded-md bg-stone-50 text-stone-500 text-xs font-semibold tracking-wide border border-stone-100">
               #{tag}
             </span>
@@ -431,10 +471,10 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
               <Calendar size={12} />
               <span className="text-xs font-medium">{photo.date}</span>
             </div>
-            {photo.location && (
+            {decryptedLocation && (
               <div className="flex items-center gap-1.5">
                 <MapPin size={12} />
-                <span className="text-xs font-medium truncate max-w-[150px]">{photo.location}</span>
+                <span className="text-xs font-medium truncate max-w-[150px]">{decryptedLocation}</span>
               </div>
             )}
           </div>

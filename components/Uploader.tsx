@@ -5,7 +5,7 @@ import { Button } from './Button';
 import { analyzeImage, analyzeMultipleImages } from '../services/geminiService';
 import { storageService } from '../services/storageService';
 import { photoService } from '../services/photoService';
-import { subscribeToAlbums } from '../services/albumService';
+import { subscribeToAlbums, createAlbum } from '../services/albumService';
 import { Photo, Album, Post } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { doc, setDoc, serverTimestamp, updateDoc, increment } from 'firebase/firestore';
@@ -255,22 +255,14 @@ export const Uploader: React.FC<UploaderProps> = ({ onUploadComplete, onCancel, 
 
     setIsCreatingAlbum(true);
     try {
-      const albumId = crypto.randomUUID();
-
-      await setDoc(doc(db, 'albums', albumId), {
-        id: albumId,
-        name: newAlbumName.trim(),
-        description: newAlbumDescription.trim(),
-        privacy: newAlbumPrivacy,
-        createdBy: user.id,
-        userId: user.id,
-        members: [user.id],
-        masterKeyId: 'FAMILY_MASTER_KEY',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        coverPhoto: null,
-        photoCount: 0
-      });
+      const albumId = await createAlbum(
+        newAlbumName.trim(),
+        user.id,
+        newAlbumDescription.trim(),
+        newAlbumPrivacy,
+        [user.id],
+        familyKey || undefined
+      );
 
       console.log(`[Uploader] Created new album: ${albumId}`);
 

@@ -17,6 +17,7 @@ export const DashboardHero: React.FC<DashboardHeroProps> = ({ post }) => {
     const { t } = useTranslation();
     const { familyKey } = useAuth();
     const [imageUrl, setImageUrl] = useState<string | null>(null);
+    const [decryptedCaption, setDecryptedCaption] = useState(post?.caption || '');
 
     // Date formatting
     const formatDate = (timestamp: number) => {
@@ -33,8 +34,11 @@ export const DashboardHero: React.FC<DashboardHeroProps> = ({ post }) => {
         const loadHeroImage = async () => {
             if (!post) {
                 setImageUrl(null);
+                setDecryptedCaption('');
                 return;
             }
+
+            setDecryptedCaption(post.caption || '');
 
             try {
                 // 1. If it has a direct public URL (legacy), use it
@@ -46,8 +50,22 @@ export const DashboardHero: React.FC<DashboardHeroProps> = ({ post }) => {
 
                 // 2. Encryption Check
                 if (post.isEncrypted && post.albumId && familyKey) {
+                    // NEW: Decrypt metadata
+                    if ((post as any).encryptedMetadata) {
+                        try {
+                            const postKey = await photoKeyModule.derivePhotoKey(familyKey, post.id);
+                            const metadata = await photoCryptoModule.decryptMetadata({
+                                encrypted: (post as any).encryptedMetadata,
+                                iv: (post as any).metadataIv,
+                                authTag: (post as any).metadataAuthTag
+                            }, postKey);
+                            if (isMounted) setDecryptedCaption(metadata.caption || post.caption || '');
+                        } catch (err) {
+                            console.error('[DashboardHero] Failed to decrypt metadata', err);
+                        }
+                    }
+
                     // Fetch photos for this post
-                    // We only need the first one (cover)
                     const postPhotos = await photoService.getPostPhotos(post.albumId, post.id);
                     if (postPhotos.length === 0) return;
 
@@ -126,7 +144,7 @@ export const DashboardHero: React.FC<DashboardHeroProps> = ({ post }) => {
                 {/* Text Content */}
                 <div className="max-w-3xl animate-fade-in-up">
                     <h1 className="text-3xl md:text-5xl lg:text-6xl font-serif font-bold text-white mb-4 leading-tight shadow-sm/50 tracking-tight drop-shadow-md">
-                        "{post.caption || t('untitled_memory')}"
+                        "{decryptedCaption || t('untitled_memory')}"
                     </h1>
                     <p className="text-lg md:text-xl text-white/80 font-medium drop-shadow-sm">
                         {formatDate(post.createdAt || Date.now())}
