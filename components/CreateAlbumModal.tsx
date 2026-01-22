@@ -32,7 +32,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
     editAlbum
 }) => {
     const { t } = useTranslation();
-    const { googleAccessToken, refreshDriveToken, unlockAlbum, familyKey } = useAuth();
+    const { user, googleAccessToken, refreshDriveToken, unlockAlbum, familyKey } = useAuth();
     const [step, setStep] = useState<Step>('DETAILS');
 
     // Details State
@@ -61,7 +61,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
             try {
                 const [groupsData, usersData] = await Promise.all([
                     getAllGroups(),
-                    userService.getAllUsers()
+                    user?.familyId ? userService.getFamilyMembers(user.familyId) : (console.log('[CreateAlbumModal] No familyId yet'), Promise.resolve([]))
                 ]);
                 console.log('[CreateAlbumModal] Fetched groups:', groupsData);
                 console.log('[CreateAlbumModal] Fetched users:', usersData);
@@ -80,7 +80,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
         if (isOpen) {
             fetchData();
         }
-    }, [isOpen, currentUserId]);
+    }, [isOpen, currentUserId, user?.familyId]);
 
     useEffect(() => {
         if (editAlbum) {

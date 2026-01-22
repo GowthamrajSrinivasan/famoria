@@ -22,7 +22,11 @@ interface PhotoCardProps {
 
 // Type guard to check if it's a Post
 function isPost(item: Post | Photo): item is Post {
-  return 'photoIds' in item && Array.isArray((item as Post).photoIds);
+  return (
+    (item as any)._isPost === true ||
+    ('photoIds' in item && Array.isArray((item as Post).photoIds)) ||
+    ('coverPhotoId' in item && !!(item as Post).coverPhotoId)
+  );
 }
 
 export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUser, onDelete }) => {
@@ -44,7 +48,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
   const [decryptedAlbumName, setDecryptedAlbumName] = useState<string | null>(null);
 
   const post = isPost(photo) ? photo : null;
-  const photoCount = post ? post.photoIds.length : 1;
+  const photoCount = post?.photoIds?.length || 1;
 
   // Debug logging - EXPANDED
   console.log(`[PhotoCard] Rendering item ${photo.id}:`, {
@@ -65,7 +69,9 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
     setIsLocked(false);
 
     // Handle non-encrypted or non-post items
-    if (!photo.isEncrypted || !photo.albumId) {
+    // Robust check: Only skip if explicitly NOT encrypted OR missing albumId
+    // If isEncrypted is undefined but albumId exists, we assume it should be encrypted
+    if (photo.isEncrypted === false || !photo.albumId) {
       console.log(`[PhotoCard] Skipping decryption: isEncrypted=${photo.isEncrypted}, albumId=${photo.albumId}`);
       if ('url' in photo) {
         setDisplayUrls([photo.url || '']);
@@ -116,13 +122,25 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
         if (post) {
           // Multi-image post - decrypt all photos in parallel
-          console.log(`[PhotoCard] 🔓 Starting decryption for post ${post.id} with ${post.photoIds.length} photos`);
+          const photoCount = post.photoIds?.length || 0;
+          console.log(`[PhotoCard] 🔓 Starting decryption for post ${post.id} with ${photoCount} photos`);
 
           // Get all photos for this post from the album
           const fetchStartTime = performance.now();
-          const postPhotos = await photoService.getPostPhotos(photo.albumId!, post.id);
+          let postPhotos = await photoService.getPostPhotos(photo.albumId!, post.id, post.photoIds);
           const fetchEndTime = performance.now();
           console.log(`[PhotoCard] ⏱️ Photo metadata fetch took: ${(fetchEndTime - fetchStartTime).toFixed(2)}ms`);
+
+          // FALLBACK: If post has 0 photos, but it's identified as a post, try treating it as a single photo
+          if (postPhotos.length === 0) {
+            console.warn(`[PhotoCard] ⚠️ Post ${post.id} returned 0 photos. Attempting legacy fallback...`);
+            const photoId = (photo as any).albumPhotoId || photo.id;
+            const fallbackDoc = await getDoc(doc(db, 'albums', photo.albumId!, 'photos', photoId));
+            if (fallbackDoc.exists()) {
+              console.log(`[PhotoCard] 🔍 Found legacy photo doc ${photoId} for post ${post.id}`);
+              postPhotos = [{ ...fallbackDoc.data(), id: photoId, _isPhoto: true }];
+            }
+          }
 
           // Use parallel processing for decryption
           const parallelStartTime = performance.now();
@@ -131,7 +149,8 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
             async (photoData, index) => {
               const photoId = photoData.id;
               const photoStartTime = performance.now();
-              console.log(`[PhotoCard] 🔐 [${index + 1}/${postPhotos.length}] Starting: ${photoId}`);
+              const totalPhotos = postPhotos?.length || 0;
+              console.log(`[PhotoCard] 🔐 [${index + 1}/${totalPhotos}] Starting: ${photoId}`);
 
               // Check cache first
               const cacheCheckStart = performance.now();
@@ -140,22 +159,22 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
               if (imageBlob) {
                 const photoEndTime = performance.now();
-                console.log(`[PhotoCard] ✅ [${index + 1}/${postPhotos.length}] Cache HIT for ${photoId} | Total: ${(photoEndTime - photoStartTime).toFixed(2)}ms`);
+                console.log(`[PhotoCard] ✅ [${index + 1}/${totalPhotos}] Cache HIT for ${photoId} | Total: ${(photoEndTime - photoStartTime).toFixed(2)}ms`);
                 return URL.createObjectURL(imageBlob);
               }
 
-              console.log(`[PhotoCard] ❌ [${index + 1}/${postPhotos.length}] Cache MISS for ${photoId} | Cache check: ${(cacheCheckEnd - cacheCheckStart).toFixed(2)}ms`);
+              console.log(`[PhotoCard] ❌ [${index + 1}/${totalPhotos}] Cache MISS for ${photoId} | Cache check: ${(cacheCheckEnd - cacheCheckStart).toFixed(2)}ms`);
 
               // Derive photo key
               const keyStartTime = performance.now();
               const photoKey = await photoKeyModule.derivePhotoKey(albumKey, photoId);
               const keyEndTime = performance.now();
-              console.log(`[PhotoCard] 🔑 [${index + 1}/${postPhotos.length}] Key derivation: ${(keyEndTime - keyStartTime).toFixed(2)}ms`);
+              console.log(`[PhotoCard] 🔑 [${index + 1}/${totalPhotos}] Key derivation: ${(keyEndTime - keyStartTime).toFixed(2)}ms`);
 
               const pathToLoad = photoData.thumbnailPath || photoData.encryptedPath;
 
               if (!pathToLoad) {
-                console.error(`[PhotoCard] ⚠️ [${index + 1}/${postPhotos.length}] No file path found for photo ${photoId}`);
+                console.error(`[PhotoCard] ⚠️ [${index + 1}/${totalPhotos}] No file path found for photo ${photoId}`);
                 return null;
               }
 
@@ -163,10 +182,10 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
               const downloadStartTime = performance.now();
               const encryptedBlob = await storageService.downloadBlob(pathToLoad);
               const downloadEndTime = performance.now();
-              console.log(`[PhotoCard] 📥 [${index + 1}/${postPhotos.length}] Download: ${(downloadEndTime - downloadStartTime).toFixed(2)}ms | Size: ${encryptedBlob.size} bytes`);
+              console.log(`[PhotoCard] 📥 [${index + 1}/${totalPhotos}] Download: ${(downloadEndTime - downloadStartTime).toFixed(2)}ms | Size: ${encryptedBlob.size} bytes`);
 
               if (encryptedBlob.size < 28) { // 12 bytes IV + 16 bytes Tag = 28 bytes minimum overhead
-                console.error(`[PhotoCard] ❌ [${index + 1}/${postPhotos.length}] Blob too small (${encryptedBlob.size} bytes). Corrupted?`);
+                console.error(`[PhotoCard] ❌ [${index + 1}/${totalPhotos}] Blob too small (${encryptedBlob.size} bytes). Corrupted?`);
                 return null;
               }
 
@@ -174,13 +193,13 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
               const headerBuffer = await encryptedBlob.slice(0, 4).arrayBuffer();
               const headerArr = new Uint8Array(headerBuffer);
               const headerHex = Array.from(headerArr).map(b => b.toString(16).padStart(2, '0')).join('');
-              console.log(`[PhotoCard] 🔍 [${index + 1}/${postPhotos.length}] Blob Header: ${headerHex}`);
+              console.log(`[PhotoCard] 🔍 [${index + 1}/${totalPhotos}] Blob Header: ${headerHex}`);
 
               // Decrypt
               const decryptStartTime = performance.now();
               imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
               const decryptEndTime = performance.now();
-              console.log(`[PhotoCard] 🔓 [${index + 1}/${postPhotos.length}] Decryption: ${(decryptEndTime - decryptStartTime).toFixed(2)}ms`);
+              console.log(`[PhotoCard] 🔓 [${index + 1}/${totalPhotos}] Decryption: ${(decryptEndTime - decryptStartTime).toFixed(2)}ms`);
 
               const decryptedUrl = URL.createObjectURL(imageBlob);
 
@@ -188,11 +207,11 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
               const cacheStartTime = performance.now();
               await cacheService.setCachedDecryptedPhoto(photoId, photo.albumId!, imageBlob, 'thumbnail');
               const cacheEndTime = performance.now();
-              console.log(`[PhotoCard] 💾 [${index + 1}/${postPhotos.length}] Cache save: ${(cacheEndTime - cacheStartTime).toFixed(2)}ms`);
+              console.log(`[PhotoCard] 💾 [${index + 1}/${totalPhotos}] Cache save: ${(cacheEndTime - cacheStartTime).toFixed(2)}ms`);
 
               const photoEndTime = performance.now();
               const totalPhotoTime = photoEndTime - photoStartTime;
-              console.log(`[PhotoCard] ✅ [${index + 1}/${postPhotos.length}] COMPLETE: ${photoId} | Total: ${totalPhotoTime.toFixed(2)}ms`);
+              console.log(`[PhotoCard] ✅ [${index + 1}/${totalPhotos}] COMPLETE: ${photoId} | Total: ${totalPhotoTime.toFixed(2)}ms`);
 
               return decryptedUrl;
             },
@@ -205,7 +224,7 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
           // Filter out null results (failed decryptions)
           const validUrls = urls.filter((url): url is string => url !== null);
 
-          if (validUrls.length === 0 && postPhotos.length > 0) {
+          if (validUrls.length === 0 && postPhotos?.length > 0) {
             console.warn('[PhotoCard] All photos failed to decrypt. Marking as locked.');
             setIsLocked(true);
           } else {
@@ -214,33 +233,67 @@ export const PhotoCard: React.FC<PhotoCardProps> = ({ photo, onClick, currentUse
 
           const overallEndTime = performance.now();
           const totalTime = overallEndTime - overallStartTime;
-          console.log(`[PhotoCard] 🎉 Post decrypted successfully: ${validUrls.length}/${postPhotos.length} images | TOTAL TIME: ${totalTime.toFixed(2)}ms (${(totalTime / 1000).toFixed(2)}s)`);
+          const totalPhotos = postPhotos?.length || 0;
+          console.log(`[PhotoCard] 🎉 Post decrypted successfully: ${validUrls.length}/${totalPhotos} images | TOTAL TIME: ${totalTime.toFixed(2)}ms (${(totalTime / 1000).toFixed(2)}s)`);
         } else {
           // Single photo (legacy)
           const photoId = (photo as any).albumPhotoId || photo.id;
-          console.log(`[PhotoCard] Decrypting single photo: ${photoId}`);
+          console.log(`[PhotoCard] 🔓 Starting single photo decryption: ${photoId} (album: ${photo.albumId})`);
 
           let imageBlob = await cacheService.getCachedDecryptedPhoto(photoId, 'thumbnail');
 
           if (!imageBlob) {
-            const photoQuery = query(
-              collection(db, 'albums', photo.albumId, 'photos'),
-              where('__name__', '==', photoId)
-            );
-            const snapshot = await getDocs(photoQuery);
+            console.log(`[PhotoCard] ❌ Cache MISS for ${photoId}, fetching from Firestore...`);
 
-            if (!snapshot.empty) {
-              const photoDoc = snapshot.docs[0].data();
-              const actualPhotoId = photoDoc.id;
+            // Refactored to use direct getDoc for better performance and reliability
+            const photoDocRef = doc(db, 'albums', photo.albumId, 'photos', photoId);
+            const photoSnap = await getDoc(photoDocRef);
+
+            if (photoSnap.exists()) {
+              const photoDoc = photoSnap.data();
+              const actualPhotoId = photoDoc.id || photoSnap.id;
+              console.log(`[PhotoCard] 📄 Found photo doc: ${actualPhotoId}, encryptedPath: ${photoDoc.encryptedPath}`);
+
               const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
               const pathToLoad = photoDoc.thumbnailPath || photoDoc.encryptedPath;
 
               if (pathToLoad) {
+                console.log(`[PhotoCard] 📥 Downloading blob from ${pathToLoad}`);
                 const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+
+                console.log(`[PhotoCard] 🔐 Decrypting file (${encryptedBlob.size} bytes)`);
                 imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+
+                console.log(`[PhotoCard] ✅ Decryption successful, saving to cache`);
                 await cacheService.setCachedDecryptedPhoto(actualPhotoId, photo.albumId, imageBlob, 'thumbnail');
+              } else {
+                console.error(`[PhotoCard] ⚠️ No path to load for photo ${photoId}`);
+              }
+            } else {
+              console.error(`[PhotoCard] ❌ Photo document NOT FOUND: albums/${photo.albumId}/photos/${photoId}`);
+              // Fallback: try querying by the 'id' field in case it's different from doc ID
+              console.log(`[PhotoCard] 🔍 Attempting fallback query by 'id' field...`);
+              const q = query(
+                collection(db, 'albums', photo.albumId, 'photos'),
+                where('id', '==', photoId)
+              );
+              const querySnap = await getDocs(q);
+              if (!querySnap.empty) {
+                const photoDoc = querySnap.docs[0].data();
+                const actualPhotoId = photoDoc.id;
+                const photoKey = await photoKeyModule.derivePhotoKey(albumKey, actualPhotoId);
+                const pathToLoad = photoDoc.thumbnailPath || photoDoc.encryptedPath;
+                if (pathToLoad) {
+                  const encryptedBlob = await storageService.downloadBlob(pathToLoad);
+                  imageBlob = await photoCryptoModule.decryptFile(encryptedBlob, photoKey);
+                  await cacheService.setCachedDecryptedPhoto(actualPhotoId, photo.albumId, imageBlob, 'thumbnail');
+                }
+              } else {
+                console.error(`[PhotoCard] ❌ Fallback query also found nothing for ${photoId}`);
               }
             }
+          } else {
+            console.log(`[PhotoCard] ✅ Cache HIT for ${photoId}`);
           }
 
           if (imageBlob) {

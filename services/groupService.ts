@@ -91,7 +91,7 @@ export const subscribeToGroups = (
 ): (() => void) => {
     const q = query(
         collection(db, GROUPS_COLLECTION),
-        where('members', 'array-contains', userId),
+        where('createdBy', '==', userId),
         orderBy('updatedAt', 'desc')
     );
 

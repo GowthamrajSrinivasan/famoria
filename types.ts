@@ -27,6 +27,7 @@ export interface Photo {
   analysis?: Record<string, any>; // AI analysis data
   aiProcessed?: boolean;
   location?: string;
+  _isPhoto?: boolean;
 }
 
 export interface Post {
@@ -49,6 +50,7 @@ export interface Post {
   encryptedMetadata?: string;
   metadataIv?: string;
   metadataAuthTag?: string;
+  _isPost?: boolean;
 }
 
 export interface User {
@@ -59,6 +61,15 @@ export interface User {
   createdAt?: string;
   lastLogin?: string;
   plan?: 'Lite' | 'Pro' | 'Ultimate';
+  familyId?: string; // Currently active family ID (Pointer for backward compatibility)
+  families?: string[]; // List of all family IDs the user belongs to
+  memberships?: {
+    [familyId: string]: {
+      role: 'admin' | 'member';
+      joinedAt: number;
+    }
+  };
+  hasKeyAccess?: boolean; // Whether the user has initialized/restored the CURRENT active family key
 }
 
 export interface UserUsage {
@@ -95,7 +106,8 @@ export enum ViewState {
   ALBUMS = 'ALBUMS',
   ALBUM_VIEW = 'ALBUM_VIEW',
   MEMBERS = 'MEMBERS',
-  VIDEOS = 'VIDEOS'
+  VIDEOS = 'VIDEOS',
+  OCCASION_PLANNER = 'OCCASION_PLANNER'
 }
 
 export interface Album {
@@ -152,6 +164,7 @@ export interface Invitation {
   id: string; // Token
   email: string;
   invitedBy: string; // User ID
+  familyId: string; // The family ID the user is invited to
   albumId?: string | null; // Optional: if inviting to specific album
   status: 'pending' | 'accepted' | 'expired';
   createdAt: number;

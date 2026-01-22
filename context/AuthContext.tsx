@@ -23,6 +23,8 @@ interface AuthContextType {
   setupFamily: () => Promise<void>;
   lockFamily: () => Promise<void>;
   unlockFamilyLocally: () => Promise<void>; // Try to unlock with local key
+  switchFamily: (familyId: string) => Promise<void>; // Switch active family
+  syncFromDrive: () => Promise<void>; // Restore key from Drive
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -40,6 +42,8 @@ const AuthContext = createContext<AuthContextType>({
   setupFamily: async () => { },
   lockFamily: async () => { },
   unlockFamilyLocally: async () => { },
+  switchFamily: async () => { },
+  syncFromDrive: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -97,10 +101,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               createdAt: new Date().toISOString(),
               plan: 'Pro',
               planLimit: 20,
-              editsUsed: 0
+              editsUsed: 0,
+              hasKeyAccess: false,
+              families: [],
+              memberships: {}
+            });
+            setUser({ ...userData, hasKeyAccess: false, families: [], memberships: {} });
+          } else {
+            const data = userSnap.data();
+            setUser({
+              ...userData,
+              familyId: data.familyId,
+              families: data.families || [],
+              memberships: data.memberships || {},
+              hasKeyAccess: data.hasKeyAccess,
+              plan: data.plan || 'Pro'
             });
           }
-          setUser(userData);
         } catch (err: any) {
           console.error('Firestore error:', err);
           setUser({
@@ -130,50 +147,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!user) {
         setFamilyKey(null);
         setIsFamilyAuthenticated(false);
+        setIsKeyInitialized(true);
         return;
       }
 
-      console.log('[AuthContext] Initializing Family Key...');
+      try {
+        console.log(`[AuthContext] Initializing Family Key for FID: ${user.familyId || 'legacy'}...`);
 
-      // 1. Check Local IDB
-      let key = await getFamilyKey();
-      setHasLocalKey(!!key);
+        // 1. Check Local IDB
+        let key = await getFamilyKey(user.familyId);
+        setHasLocalKey(!!key);
 
-      // 2. If missing, try to restore from Drive (if token available)
-      if (!key && googleAccessToken) {
-        console.log('[AuthContext] ☁️ Local key missing, checking Drive AppData...');
-        key = await familyService.restoreKeyFromDrive(googleAccessToken);
-        if (key) {
-          console.log('[AuthContext] ✅ Key successfully restored from Google Drive!');
-        } else {
-          console.warn('[AuthContext] ❌ Key NOT found in Google Drive AppData.');
+        // If key is found locally but user doesn't have hasKeyAccess in profile, update it
+        if (key && user && !user.hasKeyAccess) {
+          import('../services/userService').then(({ userService }) => {
+            userService.setHasKeyAccess(user.id, true);
+          });
+          setUser(prev => prev ? { ...prev, hasKeyAccess: true } : null);
         }
-      }
 
-      if (key) {
-        setFamilyKey(key);
-        setIsFamilyAuthenticated(true);
-        console.log('[AuthContext] 🔐 Family Authentication Successful');
-
-        // Verify IDB persistence (Double Check)
-        try {
-          const inIdb = await getFamilyKey();
-          if (!inIdb) {
-            console.log('[AuthContext] 💾 Key in memory but missing from IDB. Saving now...');
-            await saveFamilyKey(key);
+        // 2. If missing, try to restore from Drive (if token available)
+        if (!key && googleAccessToken && user.familyId) {
+          console.log('[AuthContext] ☁️ Local key missing, checking Drive AppData...');
+          key = await familyService.restoreKeyFromDrive(googleAccessToken, user.familyId);
+          if (key && user) {
+            console.log('[AuthContext] ✅ Key successfully restored from Google Drive!');
+            import('../services/userService').then(({ userService }) => {
+              userService.setHasKeyAccess(user.id, true);
+            });
+            setUser(prev => prev ? { ...prev, hasKeyAccess: true } : null);
+            await saveFamilyKey(key, user.familyId);
+          } else if (!key) {
+            console.warn('[AuthContext] ❌ Key NOT found in Google Drive AppData.');
           }
-        } catch (e) {
-          console.error('[AuthContext] ❌ Failed to verify/save IDB persistence', e);
         }
-      } else {
-        console.log('[AuthContext] 🔓 No Family Key found in IDB or Drive. Vault is locked/not setup.');
-        setIsFamilyAuthenticated(false);
+
+        if (key) {
+          setFamilyKey(key);
+          setIsFamilyAuthenticated(true);
+          console.log(`[AuthContext] 🔐 Family Authentication Successful for FID: ${user.familyId}`);
+
+          // Verify IDB persistence (Double Check)
+          try {
+            if (user.familyId) {
+              const inIdb = await getFamilyKey(user.familyId);
+              if (!inIdb) {
+                console.log(`[AuthContext] 💾 Key in memory but missing from IDB for FID: ${user.familyId}. Saving now...`);
+                await saveFamilyKey(key, user.familyId);
+              }
+            }
+          } catch (e) {
+            console.error('[AuthContext] ❌ Failed to verify/save IDB persistence', e);
+          }
+        } else {
+          console.log('[AuthContext] 🔓 No Family Key found. Vault is locked/not setup.');
+          setIsFamilyAuthenticated(false);
+        }
+      } catch (err) {
+        console.error('[AuthContext] Critical initialization error:', err);
+      } finally {
+        setIsKeyInitialized(true);
       }
-      setIsKeyInitialized(true);
     };
 
     initFamilyKey();
-  }, [user, googleAccessToken]);
+  }, [user?.familyId, googleAccessToken]); // Trigger on family switch
 
   const signIn = async () => {
     setLoading(true);
@@ -225,8 +263,77 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('[AuthContext] Creating new Family Master Key...');
     const key = await familyService.createFamilyKey(token);
 
+    // Generate or get Family ID
+    const { nanoid } = await import('nanoid');
+    const familyIdValue = user.familyId || nanoid(12);
+
+    // Update User in Firestore as ADMIN
+    const { userService } = await import('../services/userService');
+    await userService.updateUserFamily(user.id, familyIdValue, true, 'admin');
+
+    // Save key with the new ID
+    await saveFamilyKey(key, familyIdValue);
+
     setFamilyKey(key);
     setIsFamilyAuthenticated(true);
+    // User state will be updated by Firestore listener if we had one, 
+    // but here we manually update to reflect changes immediately
+    setUser(prev => prev ? {
+      ...prev,
+      familyId: familyIdValue,
+      families: prev.families?.includes(familyIdValue) ? prev.families : [...(prev.families || []), familyIdValue],
+      hasKeyAccess: true
+    } : null);
+  };
+
+  const switchFamily = async (fid: string) => {
+    if (!user || user.familyId === fid) return;
+
+    console.log(`[AuthContext] Switching to Family: ${fid}`);
+
+    // 1. Clear current key from memory (lock)
+    setFamilyKey(null);
+    setIsFamilyAuthenticated(false);
+    setIsKeyInitialized(false);
+
+    // 2. Clear cache to prevent leakage across families
+    await cacheService.clearAllCache().catch(e => console.error('Cache clear failed:', e));
+
+    // 3. Update active family in Firestore
+    const { userService } = await import('../services/userService');
+    const hasKey = !!(await getFamilyKey(fid));
+    await userService.setActiveFamily(user.id, fid, hasKey);
+
+    // 4. Update local user state
+    setUser(prev => prev ? { ...prev, familyId: fid, hasKeyAccess: hasKey } : null);
+
+    // initFamilyKey effect will trigger due to user.familyId change
+  };
+
+  const syncFromDrive = async () => {
+    if (!user?.familyId) throw new Error("No active family found.");
+
+    // 1. Force refresh token to ensure we have Drive scope
+    const token = await refreshDriveToken();
+    if (!token) {
+      throw new Error("Google Drive access required.");
+    }
+
+    // 2. Attempt restore
+    const key = await familyService.restoreKeyFromDrive(token, user.familyId);
+
+    if (key) {
+      console.log('[AuthContext] ✅ Key successfully restored from Google Drive!');
+      const { userService } = await import('../services/userService');
+      await userService.setHasKeyAccess(user.id, true);
+      setUser(prev => prev ? { ...prev, hasKeyAccess: true } : null);
+      await saveFamilyKey(key, user.familyId);
+
+      setFamilyKey(key);
+      setIsFamilyAuthenticated(true);
+    } else {
+      throw new Error("No Family Key found in your Google Drive.");
+    }
   };
 
   const value = {
@@ -246,13 +353,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setupFamily,
     lockFamily,
     unlockFamilyLocally: async () => {
-      const key = await getFamilyKey();
+      const key = await getFamilyKey(user?.familyId);
       if (key) {
         setFamilyKey(key);
         setIsFamilyAuthenticated(true);
-        console.log('[AuthContext] 🔓 Family Unlocked using local key');
+        console.log(`[AuthContext] 🔓 Family Unlocked using local key for FID: ${user?.familyId}`);
       }
-    }
+    },
+    switchFamily,
+    syncFromDrive,
   };
 
   return (

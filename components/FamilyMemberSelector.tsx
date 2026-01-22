@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Check, Search, User as UserIcon, X } from 'lucide-react';
 import { userService } from '../services/userService';
+import { useAuth } from '../context/AuthContext';
 
 interface UserOption {
     id: string;
@@ -25,11 +26,15 @@ export const FamilyMemberSelector: React.FC<FamilyMemberSelectorProps> = ({
     const [loading, setLoading] = useState(true);
     const containerRef = useRef<HTMLDivElement>(null);
 
+    const { user } = useAuth();
+
     useEffect(() => {
         const fetchUsers = async () => {
             try {
-                const allUsers = await userService.getAllUsers();
-                setUsers(allUsers);
+                const allUsers = user?.familyId
+                    ? await userService.getFamilyMembers(user.familyId)
+                    : [];
+                setUsers(allUsers as any);
             } catch (error) {
                 console.error("Failed to load users", error);
             } finally {

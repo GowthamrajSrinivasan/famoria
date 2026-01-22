@@ -4,6 +4,7 @@ import { DashboardHero } from './DashboardHero';
 import { DashboardSidebar } from './DashboardSidebar';
 import { useAuth } from '../context/AuthContext'; // Import useAuth if needed for logic here
 import { useTranslation } from 'react-i18next';
+import { Camera, Grid, FolderOpen, Film, Users, Plus } from 'lucide-react';
 
 interface ImmersiveDashboardProps {
     currentUser: User | null;
@@ -11,6 +12,7 @@ interface ImmersiveDashboardProps {
     onNavigate: (view: ViewState) => void;
     onSignOut: () => void;
     onAddNewMemory: () => void;
+    isFamilyAuthenticated: boolean;
 }
 
 export const ImmersiveDashboard: React.FC<ImmersiveDashboardProps> = ({
@@ -18,7 +20,9 @@ export const ImmersiveDashboard: React.FC<ImmersiveDashboardProps> = ({
     posts,
     onNavigate,
     onSignOut,
-    onAddNewMemory
+    onAddNewMemory,
+    onShowFamilySetup,
+    isFamilyAuthenticated
 }) => {
     const { t } = useTranslation();
     // Pick a random featured post on mount
@@ -47,6 +51,37 @@ export const ImmersiveDashboard: React.FC<ImmersiveDashboardProps> = ({
                     </h2>
                 </div>
 
+                <div loaded-post={featuredPost?.id} className="absolute top-24 left-8 right-8 z-20 flex md:hidden items-center gap-1 bg-black/20 backdrop-blur-md p-1 rounded-xl overflow-x-auto scrollbar-none animate-fade-in-up">
+                    <button
+                        onClick={() => onNavigate(ViewState.GALLERY)}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-medium transition-all whitespace-nowrap text-white/70 hover:text-white"
+                    >
+                        <Grid size={14} />
+                        <span>{t('nav_gallery')}</span>
+                    </button>
+                    <button
+                        onClick={() => onNavigate(ViewState.ALBUMS)}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-medium transition-all whitespace-nowrap text-white/70 hover:text-white"
+                    >
+                        <FolderOpen size={14} />
+                        <span>{t('nav_albums')}</span>
+                    </button>
+                    <button
+                        onClick={() => onNavigate(ViewState.VIDEOS)}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-medium transition-all whitespace-nowrap text-white/70 hover:text-white"
+                    >
+                        <Film size={14} />
+                        <span>{t('nav_videos')}</span>
+                    </button>
+                    <button
+                        onClick={() => onNavigate(ViewState.MEMBERS)}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-medium transition-all whitespace-nowrap text-white/70 hover:text-white"
+                    >
+                        <Users size={14} />
+                        <span>{t('nav_members')}</span>
+                    </button>
+                </div>
+
                 <DashboardHero
                     post={featuredPost}
                 />
@@ -59,6 +94,7 @@ export const ImmersiveDashboard: React.FC<ImmersiveDashboardProps> = ({
                     onNavigate={onNavigate}
                     onSignOut={onSignOut}
                     onAddNewMemory={onAddNewMemory}
+                    isFamilyAuthenticated={isFamilyAuthenticated}
                     currentUser={currentUser || undefined}
                 />
             </div>

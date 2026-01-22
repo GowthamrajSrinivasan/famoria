@@ -24,9 +24,9 @@ import { invitationService } from './services/invitationService';
 // import { saveMasterKey } from './lib/crypto/keyStore'; // Removed legacy
 import { familyService } from './services/familyService';
 import { InviteMemberModal } from './components/InviteMemberModal';
-import { FamilySetupModal } from './components/FamilySetupModal';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
 import { ImmersiveDashboard } from './components/ImmersiveDashboard';
+import { OccasionPlanner } from './components/OccasionPlanner';
 import { useTranslation } from 'react-i18next';
 import { cacheService } from './services/cacheService';
 import * as photoCrypto from './lib/crypto/photoCrypto';
@@ -97,7 +97,7 @@ function ProtectedApp() {
       const urlParams = new URLSearchParams(window.location.search);
       const inviteToken = urlParams.get('invite');
       const hashParams = new URLSearchParams(window.location.hash.slice(1)); // remove #
-      const keyBase64 = hashParams.get('key');
+      const keyBase64 = hashParams.get('key')?.replace(/ /g, '+');
 
       if (inviteToken && keyBase64) {
         // Store in session storage to survive login/redirects
@@ -127,18 +127,24 @@ function ProtectedApp() {
           isProcessingInvite.current = true;
 
           try {
+            console.log('[App] Processing pending invitation:', pendingToken);
             addToast(t('toast_accepting_invite'), 'info');
+
+            // Accept the invitation
             const invite = await invitationService.acceptInvitation(pendingToken, user.id);
 
-
             // Save the Family Key
-            if (pendingKey) {
-              await familyService.acceptFamilyInvite(pendingKey, googleAccessToken || undefined);
+            if (pendingKey && invite?.familyId) {
+              await familyService.acceptFamilyInvite(pendingKey, invite.familyId, googleAccessToken || undefined);
               addToast(t('toast_invite_accepted_unlocked'), 'success');
 
               // If we were not authenticated before, reload to init context
               if (!isFamilyAuthenticated) {
+                // Clear tokens BEFORE reload to prevent loop
+                sessionStorage.removeItem('pendingInviteToken');
+                sessionStorage.removeItem('pendingInviteKey');
                 window.location.reload();
+                return; // Stop execution, page will reload
               }
             } else {
               addToast(t('toast_invite_accepted'), 'success');
@@ -147,17 +153,23 @@ function ProtectedApp() {
             sessionStorage.removeItem('pendingInviteToken');
             sessionStorage.removeItem('pendingInviteKey');
 
-          } catch (error) {
+          } catch (error: any) {
             console.error('Failed to accept invitation:', error);
-            // Only show error if it's not "already accepted" or similar harmless error
-            addToast(t('toast_invite_failed'), 'error');
 
-            // Critical: Remove tokens to prevent infinite retry loop
-            sessionStorage.removeItem('pendingInviteToken');
-            sessionStorage.removeItem('pendingInviteKey');
+            // If it's already "accepted", it's usually fine - likely a re-render race condition
+            if (error.message?.includes('Invalid or expired')) {
+              console.log('[App] Invitation likely already processed or expired. Cleaning up storage.');
+              sessionStorage.removeItem('pendingInviteToken');
+              sessionStorage.removeItem('pendingInviteKey');
+              // Don't show toast if it's a silent race condition
+            } else {
+              addToast(t('toast_invite_failed'), 'error');
+              // Only remove tokens if it's a fatal error to allow manual retry if needed? 
+              // Actually, better to remove to avoid infinite loops.
+              sessionStorage.removeItem('pendingInviteToken');
+              sessionStorage.removeItem('pendingInviteKey');
+            }
           } finally {
-            // Keep locked for this session to prevent re-runs on other prop updates
-            // or set false if you want to allow re-trying on error
             isProcessingInvite.current = false;
           }
         }
@@ -179,7 +191,8 @@ function ProtectedApp() {
         if (isMounted) {
           // Decrypt posts
           const decrypted = await Promise.all(newPosts.map(async (post) => {
-            if (familyKey && post.isEncrypted && (post as any).encryptedMetadata) {
+            // Robust check: Decrypt if NOT explicitly unencrypted AND has encrypted metadata
+            if (familyKey && post.isEncrypted !== false && (post as any).encryptedMetadata) {
               try {
                 const postKey = await photoKeyModule.derivePhotoKey(familyKey, post.id);
                 const metadata = await photoCrypto.decryptMetadata({
@@ -191,7 +204,8 @@ function ProtectedApp() {
                   ...post,
                   caption: metadata.caption || post.caption,
                   tags: metadata.tags || post.tags,
-                  location: metadata.location || post.location
+                  location: metadata.location || post.location,
+                  isEncrypted: true // Ensure it's marked as encrypted if we successfully decrypted
                 };
               } catch (err) {
                 console.error(`[App] Failed to decrypt post ${post.id}:`, err);
@@ -226,7 +240,9 @@ function ProtectedApp() {
 
     const fetchFilterData = async () => {
       try {
-        const users = await userService.getAllUsers();
+        const users = user?.familyId
+          ? await userService.getFamilyMembers(user.familyId)
+          : [];
         setAvailableUsers(users.map(u => ({ id: u.id, name: u.name })));
       } catch (error) {
         console.error('[App] Error fetching users:', error);
@@ -362,11 +378,6 @@ function ProtectedApp() {
     return <Login />;
   }
 
-  // If user is authenticated but Family Key is not set up/unlocked
-  if (user && !isFamilyAuthenticated) {
-    return <FamilySetupModal />;
-  }
-
   if (view === ViewState.DASHBOARD) {
     return (
       <>
@@ -376,7 +387,10 @@ function ProtectedApp() {
           onNavigate={setView}
           onSignOut={signOut}
           onAddNewMemory={() => setView(ViewState.UPLOAD)}
+          isFamilyAuthenticated={isFamilyAuthenticated}
+          onShowFamilySetup={() => { }} // No longer needed
         />
+
         {/* Toast Notifications - Keep them global */}
         <ToastNotification toasts={toasts} onRemove={removeToast} />
       </>
@@ -415,46 +429,46 @@ function ProtectedApp() {
 
           <div className="flex items-center gap-3 sm:gap-6">
             {/* View Tabs */}
-            <div className="hidden md:flex items-center gap-2 bg-stone-100 p-1.5 rounded-xl">
+            <div className="flex items-center gap-1 sm:gap-2 bg-stone-100/80 p-1 sm:p-1.5 rounded-xl overflow-x-auto scrollbar-none max-w-[280px] sm:max-w-none">
               <button
                 onClick={() => setView(ViewState.GALLERY)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === ViewState.GALLERY || view === ViewState.UPLOAD
+                className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-medium transition-all whitespace-nowrap flex items-center ${view === ViewState.GALLERY || view === ViewState.UPLOAD
                   ? 'bg-white text-stone-800 shadow-sm'
                   : 'text-stone-500 hover:text-stone-700'
                   }`}
               >
-                <Grid size={16} className="inline mr-1.5" />
-                {t('nav_gallery')}
+                <Grid size={14} className="sm:mr-1.5" />
+                <span className="hidden sm:inline">{t('nav_gallery')}</span>
               </button>
               <button
                 onClick={() => setView(ViewState.ALBUMS)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === ViewState.ALBUMS || view === ViewState.ALBUM_VIEW
+                className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-medium transition-all whitespace-nowrap flex items-center ${view === ViewState.ALBUMS || view === ViewState.ALBUM_VIEW
                   ? 'bg-white text-stone-800 shadow-sm'
                   : 'text-stone-500 hover:text-stone-700'
                   }`}
               >
-                <FolderOpen size={16} className="inline mr-1.5" />
-                {t('nav_albums')}
+                <FolderOpen size={14} className="sm:mr-1.5" />
+                <span className="hidden sm:inline">{t('nav_albums')}</span>
               </button>
               <button
                 onClick={() => setView(ViewState.VIDEOS)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === ViewState.VIDEOS
+                className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-medium transition-all whitespace-nowrap flex items-center ${view === ViewState.VIDEOS
                   ? 'bg-white text-stone-800 shadow-sm'
                   : 'text-stone-500 hover:text-stone-700'
                   }`}
               >
-                <Film size={16} className="inline mr-1.5" />
-                {t('nav_videos')}
+                <Film size={14} className="sm:mr-1.5" />
+                <span className="hidden sm:inline">{t('nav_videos')}</span>
               </button>
               <button
                 onClick={() => setView(ViewState.MEMBERS)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${view === ViewState.MEMBERS
+                className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[12px] sm:text-sm font-medium transition-all whitespace-nowrap flex items-center ${view === ViewState.MEMBERS
                   ? 'bg-white text-stone-800 shadow-sm'
                   : 'text-stone-500 hover:text-stone-700'
                   }`}
               >
-                <Users size={16} className="inline mr-1.5" />
-                {t('nav_members')}
+                <Users size={14} className="sm:mr-1.5" />
+                <span className="hidden sm:inline">{t('nav_members')}</span>
               </button>
             </div>
 
@@ -770,6 +784,12 @@ function ProtectedApp() {
           </div>
         )}
 
+        {view === ViewState.OCCASION_PLANNER && (
+          <OccasionPlanner
+            onBack={() => setView(ViewState.DASHBOARD)}
+          />
+        )}
+
         {view === ViewState.ALBUM_VIEW && selectedAlbum && (
           <div className="animate-fade-in-up">
             <AlbumView
@@ -882,6 +902,7 @@ function ProtectedApp() {
           onClose={() => setShowInviteModal(false)}
           albumId={inviteAlbumId}
           currUserId={user.id}
+          familyId={user.familyId || ''}
         />
       )}
     </div>

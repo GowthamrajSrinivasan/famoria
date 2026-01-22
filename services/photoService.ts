@@ -1,5 +1,22 @@
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, orderBy, onSnapshot, limit, addDoc, doc, updateDoc, deleteDoc, getDoc, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  getDocs,
+  onSnapshot,
+  doc,
+  deleteDoc,
+  serverTimestamp,
+  getDoc,
+  orderBy,
+  setDoc,
+  collectionGroup,
+  Timestamp,
+  updateDoc,
+  increment
+} from 'firebase/firestore';
 import { Photo, Post } from '../types';
 import { storageService } from './storageService';
 import { cacheService } from './cacheService';
@@ -30,8 +47,9 @@ export const photoService = {
       const photos = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
-          id: doc.id,
           ...data,
+          id: doc.id,
+          _isPhoto: true,
         } as Photo;
       });
       callback(photos);
@@ -59,7 +77,7 @@ export const photoService = {
 
     // 2. Write reference record to top-level photos collection for Family Feed
     // Use the same document ID in feed collection to maintain consistency
-    const feedDocRef = await addDoc(collection(db, PHOTOS_COLLECTION), {
+    await addDoc(collection(db, PHOTOS_COLLECTION), {
       albumPhotoId: albumDocRef.id,  // Reference to album photo
       albumId: albumId,
       caption: feedMetadata.caption,
@@ -67,6 +85,7 @@ export const photoService = {
       author: feedMetadata.author,
       authorId: feedMetadata.authorId,
       isEncrypted: true,
+      _isPhoto: true,
       createdAt: serverTimestamp(),
       likes: [],
       commentsCount: 0
@@ -101,9 +120,9 @@ export const photoService = {
     );
     const snapshot = await getDocs(q);
 
-    snapshot.forEach(async (docSnapshot) => {
+    for (const docSnapshot of snapshot.docs) {
       await deleteDoc(doc(db, PHOTOS_COLLECTION, docSnapshot.id));
-    });
+    }
     console.log(`[PhotoService] Deleted photo ${photoId} from feed`);
   },
 
@@ -157,7 +176,7 @@ export const photoService = {
    * @returns Created post with ID
    */
   createPost: async (postData: Omit<Post, 'id'>): Promise<Post> => {
-    console.log(`[PhotoService] Creating post shell (initially with 0 photos, ID generation phase)`);
+    console.log(`[PhotoService] Creating post shell (initially with 0 photos)`);
 
     const docData = {
       ...postData,
@@ -237,8 +256,10 @@ export const photoService = {
       const posts = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
-          id: doc.id,
           ...data,
+          id: doc.id,
+          _isPost: true,
+          isEncrypted: data.isEncrypted ?? (data.albumId ? true : false),
           createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now()
         } as Post;
       });
@@ -263,34 +284,166 @@ export const photoService = {
    * Get all photos for a specific post
    * @param albumId Album ID
    * @param postId Post ID
+   * @param photoIds Optional array of photo IDs
    * @returns Array of photos in the post, ordered by orderInPost
    */
-  getPostPhotos: async (albumId: string, postId: string): Promise<any[]> => {
-    const q = query(
-      collection(db, 'albums', albumId, 'photos'),
-      where('postId', '==', postId),
-      orderBy('orderInPost', 'asc')
-    );
+  getPostPhotos: async (albumId: string, postId: string, photoIds?: string[]): Promise<any[]> => {
+    console.log(`[PhotoService] Fetching photos for post ${postId} in album ${albumId}. Expected IDs: ${photoIds?.length || 'query-only'}`);
 
-    const snapshot = await getDocs(q);
-    const photos = snapshot.docs.map(doc => {
-      const data = doc.data();
-      // PRIORITY: Use ID from data (UUID) over Document ID if present
-      const resolvedId = data.id || doc.id;
+    let photoDocs: any[] = [];
+    const seenIds = new Set<string>();
 
-      if (data.id && data.id !== doc.id) {
-        console.warn(`[PhotoService] ID Mismatch for photo! DocID: ${doc.id} vs DataID: ${data.id}. Using DataID.`);
+    // DEFENSIVE: Check if albumId is actually the postId (this happens in some legacy/mangled data)
+    const isSuspiciousAlbumId = albumId === postId;
+    if (isSuspiciousAlbumId) {
+      console.warn(`[PhotoService] ⚠️ Suspicious albumId detected: same as postId (${albumId}). Album-specific stages likely to fail.`);
+    }
+
+    // Stage 1: Fetch by IDs if provided (Most Reliable)
+    if (photoIds && photoIds.length > 0) {
+      console.log(`[PhotoService] Stage 1: Fetching ${photoIds.length} photos by ID`);
+      const fetchStart = performance.now();
+      const promises = photoIds.map(id => getDoc(doc(db, 'albums', albumId, 'photos', id)));
+      const snapshots = await Promise.all(promises);
+
+      snapshots.forEach(snap => {
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          const resolvedId = data.id || snap.id;
+          if (!seenIds.has(resolvedId)) {
+            photoDocs.push({ ...data, id: resolvedId, _docId: snap.id });
+            seenIds.add(resolvedId);
+          }
+        }
+      });
+      console.log(`[PhotoService] Stage 1 COMPLETE: Found ${photoDocs.length}/${photoIds.length} photos in ${(performance.now() - fetchStart).toFixed(2)}ms`);
+    }
+
+    // Stage 2: Query by postId WITH orderBy (Standard)
+    if (photoDocs.length === 0 || (photoIds && photoDocs.length < photoIds.length)) {
+      console.log(`[PhotoService] Stage 2: Querying by postId with ordering`);
+      const fetchStart = performance.now();
+      const q = query(
+        collection(db, 'albums', albumId, 'photos'),
+        where('postId', '==', postId),
+        orderBy('orderInPost', 'asc')
+      );
+
+      try {
+        const snapshot = await getDocs(q);
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as any;
+          const resolvedId = data.id || docSnap.id;
+          if (!seenIds.has(resolvedId)) {
+            photoDocs.push({ ...data, id: resolvedId, _docId: docSnap.id });
+            seenIds.add(resolvedId);
+          }
+        });
+        console.log(`[PhotoService] Stage 2 COMPLETE: Found ${snapshot.size} photos (Total: ${photoDocs.length}) in ${(performance.now() - fetchStart).toFixed(2)}ms`);
+      } catch (err) {
+        console.warn('[PhotoService] Stage 2 Failed (likely missing index?):', err);
       }
+    }
 
-      return {
-        id: resolvedId,
-        ...data,
-        // Ensure we pass the document ID too in case it's needed for updates
-        _docId: doc.id
-      };
-    });
+    // Stage 3: Query by postId WITHOUT orderBy (Fallback for missing fields or index issues)
+    if (photoDocs.length === 0) {
+      console.log(`[PhotoService] Stage 3: Falling back to unordered query by postId in album ${albumId}`);
+      const fetchStart = performance.now();
+      const q = query(
+        collection(db, 'albums', albumId, 'photos'),
+        where('postId', '==', postId)
+      );
 
-    console.log(`[PhotoService] Retrieved ${photos.length} photos for post ${postId}`);
+      const snapshot = await getDocs(q);
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data() as any;
+        const resolvedId = data.id || docSnap.id;
+        if (!seenIds.has(resolvedId)) {
+          photoDocs.push({ ...data, id: resolvedId, _docId: docSnap.id });
+          seenIds.add(resolvedId);
+        }
+      });
+      console.log(`[PhotoService] Stage 3 COMPLETE: Found ${snapshot.size} photos (Total: ${photoDocs.length}) in ${(performance.now() - fetchStart).toFixed(2)}ms`);
+    }
+
+    // Stage 4: Query TOP-LEVEL photos collection (for dual-write references)
+    if (photoDocs.length === 0 || (photoIds && photoDocs.length < photoIds.length)) {
+      console.log(`[PhotoService] Stage 4: Querying top-level photos collection for ${postId}`);
+      const fetchStart = performance.now();
+      const q = query(
+        collection(db, PHOTOS_COLLECTION),
+        where('postId', '==', postId)
+      );
+
+      const snapshot = await getDocs(q);
+      console.log(`[PhotoService] Stage 4: Found ${snapshot.size} metadata records in feed`);
+
+      for (const feedDoc of snapshot.docs) {
+        const feedData = feedDoc.data() as any;
+        const targetAlbumId = feedData.albumId || albumId;
+        const targetPhotoId = feedData.albumPhotoId || feedData.id;
+
+        if (targetPhotoId && !seenIds.has(targetPhotoId)) {
+          console.log(`[PhotoService] Stage 4: Following reference to album ${targetAlbumId}, photo ${targetPhotoId}`);
+          try {
+            const actualSnap = await getDoc(doc(db, 'albums', targetAlbumId, 'photos', targetPhotoId));
+            if (actualSnap.exists()) {
+              const actualData = actualSnap.data() as any;
+              photoDocs.push({ ...actualData, id: targetPhotoId, _docId: actualSnap.id });
+              seenIds.add(targetPhotoId);
+            }
+          } catch (err) {
+            console.warn(`[PhotoService] Stage 4: Failed to follow reference for ${targetPhotoId}:`, err);
+          }
+        }
+      }
+      console.log(`[PhotoService] Stage 4 COMPLETE: Total photos now ${photoDocs.length} | Took ${(performance.now() - fetchStart).toFixed(2)}ms`);
+    }
+
+    // Stage 5: Collection Group Query (Last resort - searches ALL albums)
+    if (photoDocs.length === 0) {
+      console.log(`[PhotoService] Stage 5: Performing COLLECTION GROUP query for ${postId}`);
+      const fetchStart = performance.now();
+      try {
+        const q = query(
+          collectionGroup(db, 'photos'),
+          where('postId', '==', postId),
+          orderBy('orderInPost', 'asc')
+        );
+        const snapshot = await getDocs(q);
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data() as any;
+          const resolvedId = data.id || docSnap.id;
+          if (!seenIds.has(resolvedId)) {
+            photoDocs.push({ ...data, id: resolvedId, _docId: docSnap.id });
+            seenIds.add(resolvedId);
+          }
+        });
+        console.log(`[PhotoService] Stage 5 COMPLETE: Found ${snapshot.size} photos in ${(performance.now() - fetchStart).toFixed(2)}ms`);
+      } catch (err) {
+        console.error('[PhotoService] Stage 5 Collection Group failed:', err);
+      }
+    }
+
+    // Final Mapping
+    const photos = photoDocs.map(data => ({
+      ...data,
+      _isPhoto: true,
+      isEncrypted: data.isEncrypted !== false
+    }));
+
+    // Re-sort if we have photoIds to maintain order
+    if (photoIds && photoIds.length > 0) {
+      photos.sort((a, b) => {
+        const indexA = photoIds.indexOf(a.id);
+        const indexB = photoIds.indexOf(b.id);
+        return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB);
+      });
+    } else {
+      photos.sort((a, b) => (a.orderInPost || 0) - (b.orderInPost || 0));
+    }
+
+    console.log(`[PhotoService] Final result: ${photos.length} photos for post ${postId}`);
     return photos;
   },
 
@@ -342,8 +495,10 @@ export const photoService = {
       const posts = snapshot.docs.map(doc => {
         const data = doc.data();
         return {
-          id: doc.id,
           ...data,
+          id: doc.id,
+          _isPost: true,
+          isEncrypted: data.isEncrypted ?? (data.albumId ? true : false),
           createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now()
         } as Post;
       });

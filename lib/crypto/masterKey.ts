@@ -3,7 +3,10 @@ export function toBase64(u8: Uint8Array): string {
 }
 
 export function fromBase64(str: string): Uint8Array {
-    return new Uint8Array(atob(str).split('').map(c => c.charCodeAt(0)));
+    // URLSearchParams or URL decoding can sometimes turn '+' into ' '.
+    // We restore them here to ensure valid Base64 for atob().
+    const normalized = str.replace(/ /g, '+');
+    return new Uint8Array(atob(normalized).split('').map(c => c.charCodeAt(0)));
 }
 
 export function generateMasterKey(): Uint8Array {

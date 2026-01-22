@@ -300,5 +300,9 @@
     "sync_drive_desc": "Restore your existing Family Key from Google Drive backup.",
     "syncing_drive": "Syncing from Drive...",
     "sync_success": "Family Key synced successfully!",
-    "sync_failed": "Failed to sync. Make sure you have a backup."
+    "sync_failed": "Failed to sync. Make sure you have a backup.",
+    "setup_family_btn": "Setup new Family or join the existing family",
+    "setup_family_subtitle": "Secure your memories together",
+    "setup_required_hint": "Required to view private content",
+    "nav_locked_hint": "Setup Family to unlock navigation"
 }

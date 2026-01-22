@@ -145,49 +145,60 @@ export async function deleteMasterKey(albumId: string) {
 const FAMILY_KEY_ID = 'FAMILY_MASTER_KEY';
 
 /**
- * Saves the Family Master Key to IndexedDB.
+ * Saves a Family Master Key to IndexedDB.
  */
-export async function saveFamilyKey(key: Uint8Array) {
+export async function saveFamilyKey(key: Uint8Array, familyId: string = FAMILY_KEY_ID) {
     try {
-        console.log('[KeyStore] Attempting to save Family Key to IDB...');
+        console.log(`[KeyStore] Saving Family Key to IDB for FID: ${familyId}`);
         const db = await getDB();
         await db.put('familyKeys', {
-            id: FAMILY_KEY_ID,
+            id: familyId,
             key,
             createdAt: Date.now()
         });
-        console.log('[KeyStore] Family Master Key SUCCESSFULLY saved to IDB');
+        console.log(`[KeyStore] Family Master Key SUCCESSFULLY saved for FID: ${familyId}`);
     } catch (e) {
-        console.error('[KeyStore] FAILED to save Family Key to IDB:', e);
+        console.error(`[KeyStore] FAILED to save Family Key for FID: ${familyId}`, e);
         throw e;
     }
 }
 
 /**
- * Retrieves the Family Master Key from IndexedDB.
+ * Retrieves a Family Master Key from IndexedDB.
+ * If familyId is provided, looks for that specific key.
+ * Otherwise, tries the legacy FAMILY_MASTER_KEY.
  */
-export async function getFamilyKey(): Promise<Uint8Array | undefined> {
+export async function getFamilyKey(familyId?: string): Promise<Uint8Array | undefined> {
     try {
-        console.log('[KeyStore] Attempting to retrieve Family Key from IDB...');
         const db = await getDB();
-        const record = await db.get('familyKeys', FAMILY_KEY_ID);
-        if (record) {
-            console.log('[KeyStore] Family Key FOUND in IDB');
-            return record.key;
-        } else {
-            console.log('[KeyStore] Family Key NOT FOUND in IDB');
-            return undefined;
+
+        // 1. Try specific familyId if provided
+        if (familyId) {
+            console.log(`[KeyStore] Retrieving Key for FID: ${familyId}`);
+            const record = await db.get('familyKeys', familyId);
+            if (record) return record.key;
         }
+
+        // 2. Try legacy fallback if no familyId or not found
+        console.log(`[KeyStore] Checking Legacy Family Key fallback...`);
+        const legacyRecord = await db.get('familyKeys', FAMILY_KEY_ID);
+        if (legacyRecord) {
+            console.log('[KeyStore] Legacy Family Key FOUND');
+            return legacyRecord.key;
+        }
+
+        console.log('[KeyStore] No Family Key found');
+        return undefined;
     } catch (e) {
-        console.error('[KeyStore] Error retrieving Family Key from IDB:', e);
+        console.error('[KeyStore] Error retrieving Family Key:', e);
         return undefined;
     }
 }
 
 /**
- * Deletes the Family Master Key (e.g., on logout).
+ * Deletes a Family Master Key.
  */
-export async function deleteFamilyKey() {
+export async function deleteFamilyKey(familyId: string = FAMILY_KEY_ID) {
     const db = await getDB();
-    await db.delete('familyKeys', FAMILY_KEY_ID);
+    await db.delete('familyKeys', familyId);
 }

@@ -49,7 +49,7 @@ export const DashboardHero: React.FC<DashboardHeroProps> = ({ post }) => {
                 }
 
                 // 2. Encryption Check
-                if (post.isEncrypted && post.albumId && familyKey) {
+                if (post.isEncrypted !== false && post.albumId && familyKey) {
                     // NEW: Decrypt metadata
                     if ((post as any).encryptedMetadata) {
                         try {

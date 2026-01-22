@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Link as LinkIcon, Check, Copy, MessageCircle } from 'lucide-react';
 import { invitationService } from '../services/invitationService';
+import { userService } from '../services/userService';
 import { getFamilyKey } from '../lib/crypto/keyStore';
 import { toBase64 } from '../lib/crypto/masterKey';
 
@@ -9,25 +10,42 @@ interface InviteMemberModalProps {
     onClose: () => void;
     albumId?: string; // Optional: if inviting to a specific album
     currUserId: string;
+    familyId: string;
 }
 
-export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, albumId, currUserId }) => {
+export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, albumId, currUserId, familyId }) => {
+    console.log('[InviteMemberModal] Rendered with:', { currUserId, familyId, albumId });
     const { t } = useTranslation();
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [inviteLink, setInviteLink] = useState('');
     const [copied, setCopied] = useState(false);
 
-    // Auto-generate link on mount
+    // Auto-generate link when props are ready
     React.useEffect(() => {
-        generateLink();
-    }, []);
+        if (currUserId) {
+            generateLink();
+        }
+    }, [familyId, currUserId, albumId]);
 
     const generateLink = async () => {
+        console.log('[InviteMemberModal] generateLink START');
         setLoading(true);
         setError('');
 
         try {
+            let effectiveFamilyId = familyId;
+
+            if (!effectiveFamilyId) {
+                console.log('[InviteMemberModal] familyId MISSING. Auto-fixing...');
+                const { nanoid } = await import('nanoid');
+                effectiveFamilyId = nanoid(12);
+                console.log('[InviteMemberModal] Generated new FID:', effectiveFamilyId);
+
+                await userService.updateUserFamily(currUserId, effectiveFamilyId, true);
+                console.log('[InviteMemberModal] FID saved to Firestore for user:', currUserId);
+            }
+
             // 1. Get Family Master Key
             const familyKey = await getFamilyKey();
             if (!familyKey) {
@@ -37,11 +55,12 @@ export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ onClose, a
 
             // 2. Create Invite Record
             // albumId is now optional for app-level invite
-            const token = await invitationService.createInvitation(currUserId, keyBase64, albumId);
+            console.log('[InviteMemberModal] Calling createInvitation with:', { currUserId, familyId: effectiveFamilyId, albumId });
+            const token = await invitationService.createInvitation(currUserId, keyBase64, effectiveFamilyId, albumId);
 
             // 3. Construct Invite Link
             const baseUrl = window.location.origin;
-            const link = `${baseUrl}/?invite=${token}#key=${keyBase64}`;
+            const link = `${baseUrl}/?invite=${token}#key=${encodeURIComponent(keyBase64)}`;
             setInviteLink(link);
 
         } catch (err: any) {

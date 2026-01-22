@@ -56,9 +56,10 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     const [showFilters, setShowFilters] = useState(false);
 
     // Decrypted Album State
-    const { familyKey } = useAuth();
+    const { user, familyKey } = useAuth();
     const [decryptedName, setDecryptedName] = useState(album.name);
     const [decryptedDescription, setDecryptedDescription] = useState(album.description || '');
+    const [memberDetails, setMemberDetails] = useState<any[]>([]);
 
     useEffect(() => {
         const decryptAlbum = async () => {
@@ -81,6 +82,21 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
         };
         decryptAlbum();
     }, [album, familyKey]);
+
+    useEffect(() => {
+        const fetchMemberDetails = async () => {
+            if (album.members && album.members.length > 0 && user?.familyId) {
+                try {
+                    const familyMembers = await userService.getFamilyMembers(user.familyId);
+                    const filtered = familyMembers.filter(m => album.members.includes(m.id));
+                    setMemberDetails(filtered);
+                } catch (err) {
+                    console.error('[AlbumView] Failed to fetch member details:', err);
+                }
+            }
+        };
+        fetchMemberDetails();
+    }, [album.members, user?.familyId]);
 
     const isOwner = currentUserId === album.createdBy;
 
@@ -172,14 +188,14 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
     useEffect(() => {
         const fetchUsers = async () => {
             try {
-                const users = await userService.getAllUsers();
-                setAvailableUsers(users.map(u => ({ id: u.id, name: u.name })));
+                const members = user?.familyId ? await userService.getFamilyMembers(user.familyId) : [];
+                setAvailableUsers(members.map(u => ({ id: u.id, name: u.name })));
             } catch (error) {
                 console.error('[AlbumView] Error fetching users:', error);
             }
         };
         fetchUsers();
-    }, []);
+    }, [user?.familyId]);
 
 
 
@@ -283,10 +299,33 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                             </span>
                             <span>•</span>
                             <span className="capitalize">{album.privacy}</span>
-                            {album.members.length > 1 && (
+                            {album.members.length > 0 && (
                                 <>
                                     <span>•</span>
-                                    <span>{album.members.length} {t('members')}</span>
+                                    <div className="flex -space-x-2 overflow-visible">
+                                        {memberDetails.length > 0 ? (
+                                            memberDetails.map((member) => (
+                                                <div
+                                                    key={member.id}
+                                                    className="w-7 h-7 rounded-full border-2 border-white overflow-hidden bg-stone-100 ring-1 ring-stone-100"
+                                                    title={member.name}
+                                                >
+                                                    <img
+                                                        src={member.avatar || `https://api.dicebear.com/9.x/avataaars/svg?seed=${member.id}`}
+                                                        alt={member.name}
+                                                        className="w-full h-full object-cover"
+                                                    />
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <span className="text-xs">{album.members.length} {t('members')}</span>
+                                        )}
+                                    </div>
+                                    {memberDetails.length > 0 && (
+                                        <span className="ml-1 text-xs">
+                                            {memberDetails.length === 1 ? memberDetails[0].name : `${memberDetails.length} items`}
+                                        </span>
+                                    )}
                                 </>
                             )}
 

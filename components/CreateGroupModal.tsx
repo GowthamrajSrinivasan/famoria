@@ -59,8 +59,13 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const loadUsers = async () => {
         setLoadingUsers(true);
         try {
-            const users = await userService.getAllUsers();
-            setAllUsers(users.filter(u => u.id !== currentUserId));
+            const currentUser = await userService.getUserById(currentUserId);
+            if (currentUser?.familyId) {
+                const allFamilyUsers = await userService.getFamilyMembers(currentUser.familyId);
+                setAllUsers(allFamilyUsers.filter(u => u.id !== currentUser.id));
+            } else {
+                setAllUsers([]);
+            }
         } catch (error) {
             console.error('Error loading users:', error);
         } finally {

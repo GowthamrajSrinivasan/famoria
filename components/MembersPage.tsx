@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Users, Mail, Calendar, Shield, ArrowLeft, Plus, Edit, Trash2 } from 'lucide-react';
 import { User, Group } from '../types';
 import { userService } from '../services/userService';
+import { useAuth } from '../context/AuthContext';
 import { subscribeToGroups, deleteGroup } from '../services/groupService';
 import { CreateGroupModal } from './CreateGroupModal';
 
@@ -14,6 +15,7 @@ interface MembersPageProps {
 
 export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId, onInvite }) => {
     const { t } = useTranslation();
+    const { user } = useAuth();
     const [activeTab, setActiveTab] = useState<'members' | 'groups'>('members');
     const [members, setMembers] = useState<User[]>([]);
     const [groups, setGroups] = useState<Group[]>([]);
@@ -25,7 +27,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
 
     useEffect(() => {
         loadMembers();
-    }, []);
+    }, [user?.familyId]);
 
     useEffect(() => {
         if (currentUserId && activeTab === 'groups') {
@@ -36,7 +38,6 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
                     setLoading(false);
                 },
                 (error) => {
-                    // Suppress permission errors (normal when not logged in)
                     if (!error.message?.includes('permission')) {
                         console.warn('Error loading groups:', error);
                         setError(t('error_loading_groups'));
@@ -45,15 +46,22 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
                 }
             );
             return () => unsubscribe();
+        } else if (activeTab === 'groups') {
+            setGroups([]);
+            setLoading(false);
         }
-    }, [currentUserId, activeTab]);
+    }, [currentUserId, user?.familyId, activeTab]);
 
     const loadMembers = async () => {
         try {
             setLoading(true);
             setError(null);
-            const users = await userService.getAllUsers();
-            setMembers(users);
+            if (user?.familyId) {
+                const familyUsers = await userService.getFamilyMembers(user.familyId);
+                setMembers(familyUsers);
+            } else {
+                setMembers([]);
+            }
         } catch (err) {
             console.error('Error loading members:', err);
             setError(t('error_loading_members'));
@@ -94,6 +102,9 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
         return members.filter(m => memberIds.includes(m.id));
     };
 
+    const activeMembers = members.filter(m => m.hasKeyAccess);
+    const pendingMembers = members.filter(m => !m.hasKeyAccess);
+
     if (loading && activeTab === 'members') {
         return (
             <div className="flex items-center justify-center h-64">
@@ -103,63 +114,61 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
     }
 
     return (
-        <div className="w-full animate-fade-in-up">
-            {/* Header */}
-            <div className="mb-8">
-                <button
-                    onClick={onBack}
-                    className="group flex items-center gap-2 text-sm font-medium text-stone-500 hover:text-stone-800 transition-colors mb-6"
-                >
-                    <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
-                    {t('back')}
-                </button>
-
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <div className="bg-gradient-to-br from-orange-400 to-orange-500 p-3 rounded-xl text-white shadow-lg shadow-orange-500/20">
-                            <Users size={28} />
-                        </div>
-                        <div>
-                            <h1 className="text-3xl font-bold text-stone-800">
-                                {activeTab === 'members' ? t('title_family_members') : t('title_groups')}
-                            </h1>
-                            <p className="text-stone-500 mt-1">
-                                {activeTab === 'members'
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
+            {/* Header section with Stats */}
+            <div className="mb-10">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                    <div>
+                        <h1 className="text-4xl font-serif font-bold text-stone-900 tracking-tight mb-2">
+                            {activeTab === 'members' ? t('title_family_members') : t('title_groups')}
+                        </h1>
+                        <p className="text-stone-500 font-medium">
+                            {user?.familyId
+                                ? (activeTab === 'members'
                                     ? t('members_count_subtitle', { count: members.length })
-                                    : t('groups_count_subtitle', { count: groups.length })}
-                            </p>
-                        </div>
+                                    : t('groups_count_subtitle', { count: groups.length }))
+                                : t('setup_family_subtitle')}
+                        </p>
                     </div>
 
-                    {activeTab === 'groups' ? (
+                    <div className="flex items-center gap-3">
                         <button
-                            onClick={() => {
-                                setEditGroup(null);
-                                setShowCreateGroupModal(true);
-                            }}
-                            className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 flex items-center gap-2 font-medium"
+                            onClick={onBack}
+                            className="p-3 bg-stone-100 text-stone-600 rounded-xl hover:bg-stone-200 transition-colors"
+                            title={t('back')}
                         >
-                            <Plus size={20} />
-                            {t('create_group')}
+                            <ArrowLeft size={20} />
                         </button>
-                    ) : (
-                        <button
-                            onClick={onInvite}
-                            className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 flex items-center gap-2 font-medium"
-                        >
-                            <Plus size={20} />
-                            {t('add_new_member')}
-                        </button>
-                    )}
+                        {activeTab === 'groups' ? (
+                            <button
+                                onClick={() => {
+                                    setEditGroup(null);
+                                    setShowCreateGroupModal(true);
+                                }}
+                                className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 flex items-center gap-2 font-medium"
+                            >
+                                <Plus size={20} />
+                                {t('create_group')}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={onInvite}
+                                className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 flex items-center gap-2 font-medium"
+                            >
+                                <Plus size={20} />
+                                {t('add_new_member')}
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-2 mb-6 bg-stone-100 p-1.5 rounded-xl w-fit">
+            <div className="flex gap-2 mb-8 bg-stone-100 p-1.5 rounded-2xl w-fit">
                 <button
                     onClick={() => setActiveTab('members')}
-                    className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'members'
-                        ? 'bg-white text-stone-800 shadow-sm'
+                    className={`px-8 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${activeTab === 'members'
+                        ? 'bg-white text-stone-900 shadow-sm'
                         : 'text-stone-500 hover:text-stone-700'
                         }`}
                 >
@@ -167,8 +176,8 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
                 </button>
                 <button
                     onClick={() => setActiveTab('groups')}
-                    className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'groups'
-                        ? 'bg-white text-stone-800 shadow-sm'
+                    className={`px-8 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${activeTab === 'groups'
+                        ? 'bg-white text-stone-900 shadow-sm'
                         : 'text-stone-500 hover:text-stone-700'
                         }`}
                 >
@@ -178,11 +187,11 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
 
             {/* Error State */}
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
-                    <p className="text-red-700 text-sm">{error}</p>
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-8 flex items-center justify-between">
+                    <p className="text-red-700 text-sm font-medium">{error}</p>
                     <button
                         onClick={loadMembers}
-                        className="mt-2 text-sm font-medium text-red-600 hover:text-red-700 underline"
+                        className="text-sm font-bold text-red-600 hover:text-red-700 underline"
                     >
                         {t('try_again')}
                     </button>
@@ -191,125 +200,133 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
 
             {/* Members Tab */}
             {activeTab === 'members' && (
-                <>
-                    {members.length === 0 ? (
-                        <div className="text-center py-20 bg-white rounded-3xl border border-stone-100">
-                            <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
+                <div className="space-y-12">
+                    {activeMembers.length === 0 && pendingMembers.length === 0 ? (
+                        <div className="text-center py-24 bg-white rounded-[2.5rem] border border-stone-100 shadow-sm">
+                            <div className="inline-flex items-center justify-center w-24 h-24 bg-stone-50 rounded-3xl mb-6">
                                 <Users size={40} className="text-stone-300" />
                             </div>
-                            <h3 className="text-xl font-semibold text-stone-700 mb-2">{t('no_members_found')}</h3>
-                            <p className="text-stone-500">{t('no_members_desc')}</p>
+                            <h3 className="text-2xl font-bold text-stone-800 mb-2">{t('no_members_found')}</h3>
+                            <p className="text-stone-500 max-w-sm mx-auto">{t('no_members_desc')}</p>
                         </div>
                     ) : (
                         <>
+                            {/* Active Members Grid */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {members.map((member) => (
+                                {activeMembers.map((member) => (
                                     <div
                                         key={member.id}
-                                        className="bg-white rounded-2xl border border-stone-100 p-6 hover:shadow-lg hover:border-orange-200 transition-all duration-300 group"
+                                        className="bg-white rounded-3xl border border-stone-100 p-6 hover:shadow-xl hover:border-orange-100 transition-all duration-500 group"
                                     >
-                                        <div className="flex items-start gap-4 mb-4">
+                                        <div className="flex items-start gap-4 mb-6">
                                             <div className="relative">
                                                 <img
                                                     src={member.avatar}
                                                     alt={member.name}
-                                                    className="w-16 h-16 rounded-full border-2 border-white shadow-md object-cover group-hover:scale-105 transition-transform"
+                                                    className="w-20 h-20 rounded-[2rem] border-2 border-white shadow-lg object-cover group-hover:scale-105 transition-transform duration-500"
                                                 />
-                                                <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 border-2 border-white rounded-full" />
+                                                <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 border-4 border-white rounded-full shadow-sm" />
                                             </div>
-                                            <div className="flex-1 min-w-0">
-                                                <h3 className="text-lg font-bold text-stone-800 truncate">
+                                            <div className="flex-1 min-w-0 pt-2">
+                                                <h3 className="text-xl font-bold text-stone-900 truncate tracking-tight">
                                                     {member.name}
                                                 </h3>
                                                 {member.email && (
-                                                    <p className="text-sm text-stone-500 truncate flex items-center gap-1 mt-1">
-                                                        <Mail size={14} />
+                                                    <p className="text-sm text-stone-400 truncate mt-0.5 font-medium">
                                                         {member.email}
                                                     </p>
                                                 )}
                                             </div>
                                         </div>
 
-                                        <div className="space-y-3">
+                                        <div className="space-y-4">
                                             {member.plan && (
-                                                <div className="flex items-center gap-2">
-                                                    <Shield size={16} className="text-stone-400" />
-                                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getPlanColor(member.plan)}`}>
-                                                        {member.plan} Plan
+                                                <div className="flex items-center justify-between p-3 bg-stone-50 rounded-2xl border border-stone-100/50">
+                                                    <div className="flex items-center gap-2 text-stone-500">
+                                                        <Shield size={16} />
+                                                        <span className="text-xs font-bold uppercase tracking-wider">{t('plan')}</span>
+                                                    </div>
+                                                    <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${getPlanColor(member.plan)}`}>
+                                                        {member.plan}
                                                     </span>
                                                 </div>
                                             )}
 
-                                            {member.createdAt && (
-                                                <div className="flex items-center gap-2 text-sm text-stone-600">
-                                                    <Calendar size={16} className="text-stone-400" />
-                                                    <span>{t('joined_date', { date: formatDate(member.createdAt) })}</span>
+                                            <div className="flex items-center justify-between px-1">
+                                                <div className="text-xs font-bold text-stone-400 flex items-center gap-1.5">
+                                                    <Calendar size={14} />
+                                                    {t('member_since')}
                                                 </div>
-                                            )}
-
-                                            {member.lastLogin && (
-                                                <div className="text-xs text-stone-500 pt-2 border-t border-stone-100">
-                                                    {t('last_active', { date: formatDate(member.lastLogin) })}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div className="mt-4 pt-4 border-t border-stone-100">
-                                            <p className="text-xs font-mono text-stone-400 truncate">
-                                                {t('member_id', { id: member.id })}
-                                            </p>
+                                                <span className="text-xs font-bold text-stone-600">{formatDate(member.createdAt)}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
 
-                            {members.length > 0 && (
-                                <div className="mt-8 bg-white rounded-2xl border border-stone-100 p-6">
-                                    <h3 className="text-lg font-bold text-stone-800 mb-4">{t('summary')}</h3>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                        <div className="text-center">
-                                            <p className="text-2xl font-bold text-orange-500">{members.length}</p>
-                                            <p className="text-sm text-stone-500 mt-1">{t('total_members')}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-2xl font-bold text-purple-500">
-                                                {members.filter(m => m.plan === 'Ultimate').length}
-                                            </p>
-                                            <p className="text-sm text-stone-500 mt-1">{t('plan_ultimate')}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-2xl font-bold text-orange-500">
-                                                {members.filter(m => m.plan === 'Pro').length}
-                                            </p>
-                                            <p className="text-sm text-stone-500 mt-1">{t('plan_pro')}</p>
-                                        </div>
-                                        <div className="text-center">
-                                            <p className="text-2xl font-bold text-stone-500">
-                                                {members.filter(m => m.plan === 'Lite' || !m.plan).length}
-                                            </p>
-                                            <p className="text-sm text-stone-500 mt-1">{t('plan_lite_free')}</p>
-                                        </div>
+                            {/* Pending Invitations */}
+                            {pendingMembers.length > 0 && (
+                                <div className="pt-12 border-t border-stone-100">
+                                    <h3 className="text-2xl font-serif font-bold text-stone-900 mb-8 flex items-center gap-3">
+                                        <span className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center">
+                                            <div className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+                                        </span>
+                                        {t('pending_invitations')}
+                                    </h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        {pendingMembers.map((member) => (
+                                            <div key={member.id} className="opacity-60 grayscale-[0.8] hover:opacity-100 hover:grayscale-0 transition-all duration-500">
+                                                <div className="bg-white rounded-3xl border border-stone-100 p-6">
+                                                    <div className="flex items-center gap-4">
+                                                        <img
+                                                            src={member.avatar}
+                                                            alt={member.name}
+                                                            className="w-14 h-14 rounded-2xl object-cover"
+                                                        />
+                                                        <div className="flex-1 min-w-0">
+                                                            <h3 className="font-bold text-stone-800 truncate">{member.name}</h3>
+                                                            <p className="text-sm text-stone-400 truncate">{member.email}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             )}
+
+                            {/* Summary Stats */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 pt-12">
+                                {[
+                                    { label: t('total_members'), value: members.length, color: 'orange' },
+                                    { label: t('plan_ultimate'), value: members.filter(m => m.plan === 'Ultimate').length, color: 'purple' },
+                                    { label: t('plan_pro'), value: members.filter(m => m.plan === 'Pro').length, color: 'orange' },
+                                    { label: t('plan_lite_free'), value: members.filter(m => m.plan === 'Lite' || !m.plan).length, color: 'stone' }
+                                ].map((stat) => (
+                                    <div key={stat.label} className="bg-white p-6 rounded-[2rem] border border-stone-100 shadow-sm text-center">
+                                        <p className={`text-3xl font-bold mb-1 text-${stat.color}-500`}>{stat.value}</p>
+                                        <p className="text-xs font-bold text-stone-400 uppercase tracking-widest">{stat.label}</p>
+                                    </div>
+                                ))}
+                            </div>
                         </>
                     )}
-                </>
+                </div>
             )}
 
             {/* Groups Tab */}
             {activeTab === 'groups' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {groups.length === 0 ? (
-                        <div className="col-span-full text-center py-20 bg-white rounded-3xl border border-stone-100">
-                            <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
+                        <div className="col-span-full text-center py-24 bg-white rounded-[2.5rem] border border-stone-100 shadow-sm">
+                            <div className="inline-flex items-center justify-center w-24 h-24 bg-stone-50 rounded-3xl mb-6">
                                 <Users size={40} className="text-stone-300" />
                             </div>
-                            <h3 className="text-xl font-semibold text-stone-700 mb-2">{t('no_groups_yet')}</h3>
-                            <p className="text-stone-500 mb-6">{t('create_first_group_desc')}</p>
+                            <h3 className="text-2xl font-bold text-stone-800 mb-2">{t('no_groups_yet')}</h3>
+                            <p className="text-stone-500 max-w-sm mx-auto mb-8">{t('create_first_group_desc')}</p>
                             <button
                                 onClick={() => setShowCreateGroupModal(true)}
-                                className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all inline-flex items-center gap-2 font-medium"
+                                className="px-8 py-3.5 bg-orange-500 text-white rounded-2xl shadow-xl shadow-orange-500/20 hover:bg-orange-600 transition-all inline-flex items-center gap-2 font-bold"
                             >
                                 <Plus size={20} />
                                 {t('create_first_group')}
@@ -323,64 +340,71 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
                             return (
                                 <div
                                     key={group.id}
-                                    className="bg-white rounded-2xl border border-stone-100 p-6 hover:shadow-lg hover:border-orange-200 transition-all duration-300 relative group"
+                                    className="bg-white rounded-[2rem] border border-stone-100 p-8 hover:shadow-xl hover:border-orange-100 transition-all duration-500 relative group flex flex-col"
                                 >
                                     {/* Group Icon & Name */}
-                                    <div className="flex items-start gap-4 mb-4">
+                                    <div className="flex items-start gap-5 mb-8">
                                         <div
-                                            className="w-16 h-16 rounded-full flex items-center justify-center text-3xl shadow-lg"
-                                            style={{ backgroundColor: group.color + '20', color: group.color }}
+                                            className="w-20 h-20 rounded-[2rem] flex items-center justify-center text-4xl shadow-lg shrink-0"
+                                            style={{ backgroundColor: group.color + '15', color: group.color }}
                                         >
-                                            {group.icon}
+                                            {group.icon || '👥'}
                                         </div>
-                                        <div className="flex-1">
-                                            <h3 className="text-lg font-bold text-stone-800">{group.name}</h3>
+                                        <div className="pt-2">
+                                            <h3 className="text-2xl font-bold text-stone-900 tracking-tight">{group.name}</h3>
                                             {group.description && (
-                                                <p className="text-sm text-stone-500 mt-1 line-clamp-2">{group.description}</p>
+                                                <p className="text-sm text-stone-500 mt-1 line-clamp-2 leading-relaxed">
+                                                    {group.description}
+                                                </p>
                                             )}
                                         </div>
                                     </div>
 
-                                    {/* Members */}
-                                    <div className="mb-4">
-                                        <p className="text-xs font-semibold text-stone-400 uppercase mb-2">
-                                            {t('members_count', { count: group.members.length })}
-                                        </p>
-                                        <div className="flex -space-x-2">
+                                    {/* Members Section */}
+                                    <div className="mt-auto pt-6 border-t border-stone-50">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <span className="text-xs font-bold text-stone-400 uppercase tracking-widest">
+                                                {t('members')}
+                                            </span>
+                                            <span className="text-sm font-bold text-stone-900">
+                                                {group.members.length}
+                                            </span>
+                                        </div>
+                                        <div className="flex -space-x-3">
                                             {groupMembers.slice(0, 5).map((member) => (
                                                 <img
                                                     key={member.id}
                                                     src={member.avatar}
                                                     alt={member.name}
-                                                    className="w-8 h-8 rounded-full border-2 border-white"
+                                                    className="w-10 h-10 rounded-xl border-4 border-white shadow-sm object-cover"
                                                     title={member.name}
                                                 />
                                             ))}
                                             {group.members.length > 5 && (
-                                                <div className="w-8 h-8 rounded-full border-2 border-white bg-stone-200 flex items-center justify-center text-xs font-semibold text-stone-600">
+                                                <div className="w-10 h-10 rounded-xl border-4 border-white bg-stone-100 flex items-center justify-center text-xs font-bold text-stone-400 shadow-sm">
                                                     +{group.members.length - 5}
                                                 </div>
                                             )}
                                         </div>
                                     </div>
 
-                                    {/* Actions */}
+                                    {/* Actions Overlay */}
                                     {isOwner && (
-                                        <div className="flex gap-2 pt-4 border-t border-stone-100 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex gap-2 mt-8">
                                             <button
                                                 onClick={() => {
                                                     setEditGroup(group);
                                                     setShowCreateGroupModal(true);
                                                 }}
-                                                className="flex-1 px-3 py-2 bg-stone-100 text-stone-700 rounded-lg hover:bg-stone-200 transition-colors text-sm font-medium flex items-center justify-center gap-1"
+                                                className="flex-1 px-4 py-2.5 bg-stone-50 text-stone-600 rounded-xl hover:bg-stone-100 transition-colors text-sm font-bold flex items-center justify-center gap-2 border border-stone-100"
                                             >
-                                                <Edit size={14} /> {t('edit')}
+                                                <Edit size={16} /> {t('edit')}
                                             </button>
                                             <button
                                                 onClick={() => setDeleteConfirm(group.id)}
-                                                className="flex-1 px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors text-sm font-medium flex items-center justify-center gap-1"
+                                                className="px-4 py-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors text-sm font-bold flex items-center justify-center border border-red-100"
                                             >
-                                                <Trash2 size={14} /> {t('delete')}
+                                                <Trash2 size={16} />
                                             </button>
                                         </div>
                                     )}
@@ -391,7 +415,7 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
                 </div>
             )}
 
-            {/* Create Group Modal */}
+            {/* Modals outside main layout flow */}
             {currentUserId && (
                 <CreateGroupModal
                     isOpen={showCreateGroupModal}
@@ -408,26 +432,30 @@ export const MembersPage: React.FC<MembersPageProps> = ({ onBack, currentUserId,
                 />
             )}
 
-            {/* Delete Confirmation Modal */}
             {deleteConfirm && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in-up">
-                        <h3 className="text-xl font-bold text-stone-800 mb-2">{t('delete_group_title')}</h3>
-                        <p className="text-stone-600 mb-6">
+                <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-in fade-in duration-300">
+                    <div className="bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl border border-stone-100 animate-in zoom-in-95 duration-300">
+                        <div className="w-20 h-20 bg-red-50 rounded-3xl flex items-center justify-center mx-auto mb-8">
+                            <Trash2 size={32} className="text-red-500" />
+                        </div>
+                        <h3 className="text-2xl font-bold text-stone-900 text-center mb-3">
+                            {t('delete_group_title')}
+                        </h3>
+                        <p className="text-stone-500 text-center mb-10 leading-relaxed font-medium">
                             {t('delete_group_message')}
                         </p>
-                        <div className="flex gap-3">
-                            <button
-                                onClick={() => setDeleteConfirm(null)}
-                                className="flex-1 px-4 py-3 bg-stone-100 text-stone-700 rounded-xl hover:bg-stone-200 transition-colors font-medium"
-                            >
-                                {t('cancel')}
-                            </button>
+                        <div className="flex flex-col gap-3">
                             <button
                                 onClick={() => handleDeleteGroup(deleteConfirm)}
-                                className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium"
+                                className="w-full py-4 bg-red-500 text-white rounded-2xl hover:bg-red-600 transition-all font-bold shadow-xl shadow-red-500/20 active:scale-[0.98]"
                             >
                                 {t('delete')}
+                            </button>
+                            <button
+                                onClick={() => setDeleteConfirm(null)}
+                                className="w-full py-4 bg-stone-100 text-stone-600 rounded-2xl hover:bg-stone-200 transition-all font-bold active:scale-[0.98]"
+                            >
+                                {t('cancel')}
                             </button>
                         </div>
                     </div>

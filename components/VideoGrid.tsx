@@ -45,7 +45,9 @@ export const VideoGrid: React.FC<VideoGridProps> = ({ currentUser, albumId }) =>
 
         const fetchFilterData = async () => {
             try {
-                const users = await userService.getAllUsers();
+                const users = currentUser?.familyId
+                    ? await userService.getFamilyMembers(currentUser.familyId)
+                    : [];
                 setAvailableUsers(users.map(u => ({ id: u.id, name: u.name })));
             } catch (error) {
                 console.error('[VideoGrid] Error fetching users:', error);

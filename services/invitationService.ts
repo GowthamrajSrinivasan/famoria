@@ -17,20 +17,30 @@ export const invitationService = {
     createInvitation: async (
         invitedByUserId: string,
         keyBase64: string, // The Master Key in Base64
+        familyId: string,
         albumId?: string,
         email?: string // Optional now
     ): Promise<string> => {
+        console.log('[invitationService] creating invite:', { invitedByUserId, familyId, albumId, keyPresent: !!keyBase64 });
+
+        if (!familyId) {
+            throw new Error('Family ID is required to create an invitation. Please ensure your family is set up.');
+        }
+
         try {
             const token = nanoid(32); // Secure random token
             const invitation: Invitation = {
                 id: token,
                 email: email || 'whatsapp-share', // Placeholder if not provided
                 invitedBy: invitedByUserId,
+                familyId,
                 albumId: albumId || null,
                 status: 'pending',
                 createdAt: Date.now(),
                 expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
             };
+
+            console.log('[invitationService] saving invitation object:', invitation);
 
             // Store invitation in Firestore
             await setDoc(doc(db, INVITATIONS_COLLECTION, token), invitation);
@@ -86,6 +96,10 @@ export const invitationService = {
                     members: arrayUnion(userId)
                 });
             }
+
+            // Sync Family ID and Key Access to User Profile
+            const { userService } = await import('./userService');
+            await userService.updateUserFamily(userId, invite.familyId, true);
 
             return invite;
         } catch (error) {
