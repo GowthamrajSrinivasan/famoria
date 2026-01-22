@@ -41,6 +41,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
     const [privacy, setPrivacy] = useState<'private' | 'family' | 'public'>('family');
     const [coverFile, setCoverFile] = useState<File | null>(null);
     const [coverPreview, setCoverPreview] = useState<string | null>(null);
+    const [category, setCategory] = useState('General');
 
     // Access Permission State
     const [accessTab, setAccessTab] = useState<'groups' | 'members'>('groups');
@@ -87,6 +88,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
             setName(editAlbum.name);
             setDescription(editAlbum.description || '');
             setPrivacy(editAlbum.privacy);
+            setCategory(editAlbum.category || 'General');
             setCoverPreview(editAlbum.coverPhoto || null);
             setCoverFile(null);
 
@@ -118,6 +120,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
             setRecoveryKey(null);
             setHasDownloaded(false);
             setStep('DETAILS');
+            setCategory('General');
             setCoverFile(null);
             setCoverPreview(null);
             setSelectedGroups([]);
@@ -209,7 +212,8 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     description: description.trim(),
                     privacy,
                     members: [currentUserId, ...selectedMembers],
-                    selectedGroups
+                    selectedGroups,
+                    category
                 };
 
                 // Only update cover if changed
@@ -231,6 +235,7 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                     selectedMembers,
                     selectedGroups,
                     coverPhotoURL,
+                    category,
                     familyKey || undefined
                 );
 
@@ -285,6 +290,26 @@ export const CreateAlbumModal: React.FC<CreateAlbumModalProps> = ({
                                 className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl focus:ring-2 focus:ring-orange-200 outline-none transition-all"
                                 autoFocus
                             />
+                        </div>
+
+                        {/* Category Selector */}
+                        <div>
+                            <label className="block text-sm font-semibold text-stone-700 mb-2">{t('album_category_label', 'Category')}</label>
+                            <div className="flex flex-wrap gap-2">
+                                {['General', 'Wedding', 'Vacation', 'Birthday', 'Kids', 'Event', 'Other'].map(cat => (
+                                    <button
+                                        key={cat}
+                                        type="button"
+                                        onClick={() => setCategory(cat)}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${category === cat
+                                            ? 'bg-orange-500 text-white shadow-md'
+                                            : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                            }`}
+                                    >
+                                        {cat}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
 
                         {/* Cover Image Upload */}

@@ -123,6 +123,7 @@ export interface Album {
   members: string[]; // Array of user IDs who can access (if accessType is 'members', or expanded from groups)
   photoCount?: number; // Cached count of photos/posts
   videoCount?: number; // Cached count of videos
+  category?: string; // Album category (e.g., Wedding, Vacation)
   // Encrypted Metadata
   encryptedName?: string;
   encryptedDescription?: string;

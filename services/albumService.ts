@@ -30,6 +30,7 @@ export const createAlbum = async (
     members: string[] = [],
     selectedGroups: string[] = [],
     coverPhoto: string | null = null,
+    category: string = 'General',
     familyKey?: Uint8Array
 ): Promise<string> => {
     if (!name || name.length > 50) {
@@ -52,7 +53,8 @@ export const createAlbum = async (
         members: [...new Set([createdBy, ...members])], // Ensure creator is in members
         photoCount: 0,
         videoCount: 0,
-        coverPhoto
+        coverPhoto,
+        category
     };
 
     // If familyKey is provided, encrypt the metadata
@@ -154,13 +156,25 @@ export const deleteAlbum = async (albumId: string): Promise<void> => {
 export const subscribeToAlbums = (
     userId: string,
     onUpdate: (albums: Album[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    category?: string
 ): (() => void) => {
-    const q = query(
-        collection(db, ALBUMS_COLLECTION),
-        where('members', 'array-contains', userId),
-        orderBy('updatedAt', 'desc')
-    );
+    let q;
+
+    if (category && category !== 'All') {
+        q = query(
+            collection(db, ALBUMS_COLLECTION),
+            where('members', 'array-contains', userId),
+            where('category', '==', category),
+            orderBy('updatedAt', 'desc')
+        );
+    } else {
+        q = query(
+            collection(db, ALBUMS_COLLECTION),
+            where('members', 'array-contains', userId),
+            orderBy('updatedAt', 'desc')
+        );
+    }
 
     return onSnapshot(
         q,
@@ -180,6 +194,7 @@ export const subscribeToAlbums = (
                     members: data.members || [],
                     photoCount: data.photoCount !== undefined ? data.photoCount : 0,
                     videoCount: data.videoCount !== undefined ? data.videoCount : 0,
+                    category: data.category || 'General',
                     encryptedName: data.encryptedName,
                     metadataIv: data.metadataIv,
                     metadataAuthTag: data.metadataAuthTag

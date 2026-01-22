@@ -28,6 +28,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
     const [loading, setLoading] = useState(true);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [selectedCategory, setSelectedCategory] = useState('All');
 
     const { familyKey } = useAuth();
 
@@ -68,11 +69,12 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
             (error) => {
                 console.error('Error subscribing to albums:', error);
                 setLoading(false);
-            }
+            },
+            selectedCategory
         );
 
         return () => unsubscribe();
-    }, [currentUserId, familyKey]);
+    }, [currentUserId, familyKey, selectedCategory]);
 
     // Search and sort functionality
     useEffect(() => {
@@ -150,115 +152,137 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                 </button>
             </div>
 
+            {/* Category Filter Bar */}
+            <div className="mb-6 flex overflow-x-auto gap-2 pb-2 no-scrollbar">
+                {['All', 'General', 'Wedding', 'Vacation', 'Birthday', 'Kids', 'Event', 'Other'].map(cat => (
+                    <button
+                        key={cat}
+                        onClick={() => setSelectedCategory(cat)}
+                        className={`px-5 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-all duration-300 ${selectedCategory === cat
+                            ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/30'
+                            : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-50'
+                            }`}
+                    >
+                        {cat === 'All' ? t('all_categories', 'All') : cat}
+                    </button>
+                ))}
+            </div>
+
             {/* Search Bar and Sort */}
-            {albums.length > 0 && (
-                <div className="mb-6 flex flex-col sm:flex-row gap-4">
-                    {/* Search Bar */}
-                    <div className="flex-1 relative">
-                        <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            placeholder={t('search_albums_placeholder')}
-                            className="w-full pl-12 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all"
-                        />
-                    </div>
+            {
+                albums.length > 0 && (
+                    <div className="mb-6 flex flex-col sm:flex-row gap-4">
+                        {/* Search Bar */}
+                        <div className="flex-1 relative">
+                            <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-stone-400" />
+                            <input
+                                type="text"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                placeholder={t('search_albums_placeholder')}
+                                className="w-full pl-12 pr-4 py-3 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all"
+                            />
+                        </div>
 
-                    {/* Sort Dropdown */}
-                    <div className="flex items-center gap-3">
-                        <ArrowUpDown size={16} className="text-stone-400" />
-                        <span className="text-sm font-medium text-stone-600">{t('sort_by')}</span>
-                        <select
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as any)}
-                            className="px-4 py-3 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
-                        >
-                            <option value="newest">{t('sort_newest')}</option>
-                            <option value="oldest">{t('sort_oldest')}</option>
-                            <option value="photos">{t('sort_most_photos')}</option>
-                            <option value="videos">{t('sort_most_videos')}</option>
-                        </select>
-                    </div>
-                </div>
-            )}
-
-            {/* Albums Grid */}
-            {filteredAlbums.length === 0 ? (
-                <div className="text-center py-20">
-                    <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
-                        <FolderOpen size={40} className="text-stone-300" />
-                    </div>
-                    <h3 className="text-xl font-semibold text-stone-700 mb-2">
-                        {searchTerm ? t('no_albums_found') : t('no_albums_yet')}
-                    </h3>
-                    <p className="text-stone-500 mb-6">
-                        {searchTerm
-                            ? t('hint_search')
-                            : t('hint_create_first_album')}
-                    </p>
-                    {!searchTerm && (
-                        <button
-                            onClick={onCreateAlbum}
-                            className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 inline-flex items-center gap-2 font-medium"
-                        >
-                            <Plus size={20} />
-                            <span>{t('create_first_album')}</span>
-                        </button>
-                    )}
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {filteredAlbums.map((album) => (
-                        <AlbumCard
-                            key={album.id}
-                            album={album}
-                            currentUserId={currentUserId}
-                            onClick={() => onViewAlbum(album)}
-                            onEdit={() => onEditAlbum(album)}
-                            onDelete={() => setDeleteConfirm(album.id)}
-                        />
-                    ))}
-                </div>
-            )}
-
-            {/* Delete Confirmation Modal */}
-            {deleteConfirm && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in-up">
-                        <h3 className="text-xl font-bold text-stone-800 mb-2">{t('delete_album_title')}</h3>
-                        <p className="text-stone-600 mb-2">
-                            <span dangerouslySetInnerHTML={{ __html: t('delete_album_message') }}></span>
-                        </p>
-                        <p className="text-red-600 text-sm font-medium mb-6">
-                            {t('delete_album_warning')}
-                        </p>
-                        <div className="flex gap-3">
-                            <button
-                                onClick={() => setDeleteConfirm(null)}
-                                disabled={isDeleting}
-                                className="flex-1 px-4 py-3 bg-stone-100 text-stone-700 rounded-xl hover:bg-stone-200 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        {/* Sort Dropdown */}
+                        <div className="flex items-center gap-3">
+                            <ArrowUpDown size={16} className="text-stone-400" />
+                            <span className="text-sm font-medium text-stone-600">{t('sort_by')}</span>
+                            <select
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value as any)}
+                                className="px-4 py-3 bg-white border border-stone-200 rounded-xl text-sm font-medium text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300 transition-all cursor-pointer hover:border-stone-300"
                             >
-                                {t('cancel')}
-                            </button>
-                            <button
-                                onClick={() => handleDelete(deleteConfirm)}
-                                disabled={isDeleting}
-                                className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium disabled:bg-red-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                            >
-                                {isDeleting ? (
-                                    <>
-                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                        <span>{t('deleting')}</span>
-                                    </>
-                                ) : (
-                                    t('delete')
-                                )}
-                            </button>
+                                <option value="newest">{t('sort_newest')}</option>
+                                <option value="oldest">{t('sort_oldest')}</option>
+                                <option value="photos">{t('sort_most_photos')}</option>
+                                <option value="videos">{t('sort_most_videos')}</option>
+                            </select>
                         </div>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+
+            {/* Albums Grid */}
+            {
+                filteredAlbums.length === 0 ? (
+                    <div className="text-center py-20">
+                        <div className="inline-flex items-center justify-center w-20 h-20 bg-stone-100 rounded-full mb-4">
+                            <FolderOpen size={40} className="text-stone-300" />
+                        </div>
+                        <h3 className="text-xl font-semibold text-stone-700 mb-2">
+                            {searchTerm ? t('no_albums_found') : t('no_albums_yet')}
+                        </h3>
+                        <p className="text-stone-500 mb-6">
+                            {searchTerm
+                                ? t('hint_search')
+                                : t('hint_create_first_album')}
+                        </p>
+                        {!searchTerm && (
+                            <button
+                                onClick={onCreateAlbum}
+                                className="px-6 py-3 bg-orange-500 text-white rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-all active:scale-95 inline-flex items-center gap-2 font-medium"
+                            >
+                                <Plus size={20} />
+                                <span>{t('create_first_album')}</span>
+                            </button>
+                        )}
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {filteredAlbums.map((album) => (
+                            <AlbumCard
+                                key={album.id}
+                                album={album}
+                                currentUserId={currentUserId}
+                                onClick={() => onViewAlbum(album)}
+                                onEdit={() => onEditAlbum(album)}
+                                onDelete={() => setDeleteConfirm(album.id)}
+                            />
+                        ))}
+                    </div>
+                )
+            }
+
+            {/* Delete Confirmation Modal */}
+            {
+                deleteConfirm && (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-fade-in-up">
+                            <h3 className="text-xl font-bold text-stone-800 mb-2">{t('delete_album_title')}</h3>
+                            <p className="text-stone-600 mb-2">
+                                <span dangerouslySetInnerHTML={{ __html: t('delete_album_message') }}></span>
+                            </p>
+                            <p className="text-red-600 text-sm font-medium mb-6">
+                                {t('delete_album_warning')}
+                            </p>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setDeleteConfirm(null)}
+                                    disabled={isDeleting}
+                                    className="flex-1 px-4 py-3 bg-stone-100 text-stone-700 rounded-xl hover:bg-stone-200 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {t('cancel')}
+                                </button>
+                                <button
+                                    onClick={() => handleDelete(deleteConfirm)}
+                                    disabled={isDeleting}
+                                    className="flex-1 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors font-medium disabled:bg-red-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                >
+                                    {isDeleting ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            <span>{t('deleting')}</span>
+                                        </>
+                                    ) : (
+                                        t('delete')
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 };
