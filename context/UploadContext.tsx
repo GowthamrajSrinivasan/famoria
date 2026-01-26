@@ -5,7 +5,7 @@ import * as keyModule from '../lib/crypto/photoKey';
 import * as cryptoModule from '../lib/crypto/photoCrypto';
 import { storageService } from '../services/storageService';
 import { photoService } from '../services/photoService';
-import { doc, updateDoc, increment } from 'firebase/firestore';
+import { doc, updateDoc, increment, collection } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 export interface UploadTask {
@@ -83,6 +83,14 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             };
             const encMeta = await cryptoModule.encryptMetadata(metadata, photoKey);
 
+            // NEW: Pre-generate Post ID for Atomic Write
+            const postRef = doc(collection(db, 'posts'));
+            const postId = postRef.id;
+
+            // Encrypt Post-level metadata
+            const postKey = await keyModule.derivePhotoKey(albumKey, postId);
+            const encPostMeta = await cryptoModule.encryptMetadata(metadata, postKey);
+
             // Create post with thumbnail only
             const encryptedPhotoRecord = {
                 id: task.photoId,
@@ -100,49 +108,37 @@ export const UploadProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             const postData: Omit<Post, 'id'> = {
                 albumId: task.albumId,
-                caption: task.caption,
-                tags: task.tags,
+                caption: '[Securely Encrypted]',
+                tags: [],
                 date: task.date ? new Date(task.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-                location: task.location || "",
+                location: '[Securely Encrypted]',
                 author: user.name,
                 authorId: user.id,
-                photoIds: [],
-                coverPhotoId: '',
+                photoIds: [], // Will be auto-filled by atomic service
+                coverPhotoId: '', // Will be auto-filled by atomic service
                 createdAt: Date.now(),
                 isEncrypted: true,
                 likes: [],
                 commentsCount: 0,
-                uploadStatus: 'uploading' // New field to track upload state
-            };
-
-            const createdPost = await photoService.createPost(postData);
-
-            // NEW: Encrypt Post-level metadata for 100% Privacy
-            const postKey = await keyModule.derivePhotoKey(albumKey, createdPost.id);
-            const encPostMeta = await cryptoModule.encryptMetadata(metadata, postKey);
-
-            const savedPhotos = await photoService.addPhotosToPost(task.albumId, createdPost.id, [encryptedPhotoRecord]);
-
-            const uploadedPhotoIds = savedPhotos.map(p => p.id);
-            const actualPhotoDocId = savedPhotos[0]?.id; // Get the actual Firestore document ID
-
-            const postRef = doc(db, 'posts', createdPost.id);
-            await updateDoc(postRef, {
-                photoIds: uploadedPhotoIds,
-                coverPhotoId: uploadedPhotoIds[0],
+                uploadStatus: 'uploading', // New field to track upload state
                 // Full Privacy Fields
                 encryptedMetadata: encPostMeta.encrypted,
                 metadataIv: encPostMeta.iv,
                 metadataAuthTag: encPostMeta.authTag,
-                // Redact plain text fields for 100% Zero-Knowledge
-                caption: '[Securely Encrypted]',
-                location: '[Securely Encrypted]',
-                tags: []
-            });
+            };
+
+            // Use Atomic Write to ensure Post and Photo exist together
+            const { post: createdPost, photos: savedPhotos } = await photoService.createPostWithPhotosAtomic(
+                postData,
+                [encryptedPhotoRecord],
+                postId
+            );
+
+            const actualPhotoDocId = savedPhotos[0]?.id; // Get the actual Firestore document ID
 
             setTasks(prev => prev.map(t => t.id === task.id ? { ...t, postId: createdPost.id, progress: 50 } : t));
 
-            console.log(`[Upload] ✅ Thumbnail uploaded, post created: ${createdPost.id}, photo doc: ${actualPhotoDocId}`);
+            console.log(`[Upload] ✅ Atomic Post created: ${createdPost.id}, photo doc: ${actualPhotoDocId}`);
 
             // Phase 2: Encrypt and upload full image (slow, background)
             setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'uploading-full', progress: 60 } : t));

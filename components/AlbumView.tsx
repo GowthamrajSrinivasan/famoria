@@ -143,7 +143,12 @@ export const AlbumView: React.FC<AlbumViewProps> = ({
                         return post;
                     }));
 
-                    setPosts(decrypted);
+                    // Filter out posts with no photos
+                    const validPosts = decrypted.filter(post =>
+                        post.photoIds && post.photoIds.length > 0
+                    );
+
+                    setPosts(validPosts);
                     postsLoaded = true;
                     checkLoadingComplete();
                 }

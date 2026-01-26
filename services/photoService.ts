@@ -15,7 +15,8 @@ import {
   collectionGroup,
   Timestamp,
   updateDoc,
-  increment
+  increment,
+  writeBatch
 } from 'firebase/firestore';
 import { Photo, Post } from '../types';
 import { storageService } from './storageService';
@@ -25,6 +26,68 @@ const PHOTOS_COLLECTION = 'photos';
 const POSTS_COLLECTION = 'posts';
 
 export const photoService = {
+  // ATOMIC / ROBUST CREATION
+  createPostWithPhotosAtomic: async (
+    postData: Omit<Post, 'id'>,
+    photosData: any[],
+    explicitPostId?: string
+  ): Promise<{ post: Post, photos: any[] }> => {
+    const batch = writeBatch(db);
+
+    // 1. Create Post Reference
+    const postRef = explicitPostId
+      ? doc(db, POSTS_COLLECTION, explicitPostId)
+      : doc(collection(db, POSTS_COLLECTION));
+    const postId = postRef.id;
+
+    // 2. Prepare Photos and IDs
+    const preparedPhotos = photosData.map((p, index) => {
+      // Use existing ID if provided, or generate new
+      const photoRef = p.id
+        ? doc(db, 'albums', p.albumId, 'photos', p.id)
+        : doc(collection(db, 'albums', p.albumId, 'photos'));
+
+      return {
+        ...p,
+        id: photoRef.id,
+        postId: postId,
+        orderInPost: index,
+        createdAt: serverTimestamp(),
+        ref: photoRef
+      };
+    });
+
+    const photoIds = preparedPhotos.map(p => p.id);
+
+    // 3. Set Post Data
+    const params = {
+      ...postData,
+      id: postId,
+      photoIds: photoIds,
+      coverPhotoId: photoIds[0] || '',
+      createdAt: serverTimestamp(),
+      likes: [],
+      commentsCount: 0
+    };
+
+    batch.set(postRef, params);
+
+    // 4. Set Photos Data
+    preparedPhotos.forEach(p => {
+      const { ref, ...data } = p;
+      batch.set(ref, data);
+    });
+
+    // 5. Commit
+    await batch.commit();
+    console.log(`[PhotoService] Atomic creation successful: Post ${postId} with ${photoIds.length} photos`);
+
+    return {
+      post: { ...params, createdAt: Date.now() } as Post,
+      photos: preparedPhotos.map(({ ref, ...data }) => data)
+    };
+  },
+
   // LEGACY / PUBLIC FEED SUPPORT
   addPhoto: async (photo: Omit<Photo, 'id'>) => {
     const docData = {

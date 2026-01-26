@@ -215,7 +215,12 @@ function ProtectedApp() {
             return post;
           }));
 
-          setPosts(decrypted);
+          // Filter out posts with no photos (prevents "zombie" posts from failed uploads)
+          const validPosts = decrypted.filter(post =>
+            post.photoIds && post.photoIds.length > 0
+          );
+
+          setPosts(validPosts);
         }
       });
     } catch (error) {

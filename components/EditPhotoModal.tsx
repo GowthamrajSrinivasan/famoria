@@ -40,7 +40,7 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
 
   const handleGenerate = async () => {
     if (!prompt.trim() || !user) return;
-    
+
     const hasQuota = await userService.checkQuota(user.id);
     if (!hasQuota) {
       setError("You've reached your monthly AI edit limit. Please upgrade your plan.");
@@ -66,12 +66,17 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
 
     try {
       // 1. Upload edited image (Base64) to Firebase Storage
+      // RESPECT ALBUM STRUCTURE if applicable
       const fileName = `edited_${Date.now()}.png`;
-      const downloadURL = await storageService.uploadImage(resultImage, `photos/${user.id}/edits/${fileName}`);
+      const storagePath = photo.albumId
+        ? `albums/${photo.albumId}/photos/edits/${fileName}`
+        : `photos/${user.id}/edits/${fileName}`;
+
+      const downloadURL = await storageService.uploadImage(resultImage, storagePath);
 
       // 2. Increment usage
       await userService.incrementUsage(user.id);
-      
+
       // 3. Save new photo record
       const newPhotoData = {
         url: downloadURL,
@@ -81,10 +86,20 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
         author: user.name,
         authorId: user.id,
         isAiGenerated: true,
-        originalPhotoId: photo.id
+        originalPhotoId: photo.id,
+        albumId: photo.albumId // Maintain album association
       };
 
-      const savedPhoto = await photoService.addPhoto(newPhotoData);
+      let savedPhoto: any;
+
+      if (photo.albumId) {
+        // Save to album subcollection
+        savedPhoto = await photoService.addEncryptedPhoto(photo.albumId, newPhotoData);
+      } else {
+        // Legacy behavior
+        savedPhoto = await photoService.addPhoto(newPhotoData);
+      }
+
       onSave(savedPhoto as Photo);
       onClose();
     } catch (e) {
@@ -98,37 +113,37 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-stone-900/95 backdrop-blur-md p-4 animate-fade-in-up">
       <div className="w-full max-w-5xl h-[85vh] bg-stone-900 rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row border border-stone-800">
-        
+
         {/* Left: Image Preview Area */}
         <div className="flex-1 relative bg-black flex flex-col">
           {/* Header over image */}
           <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-start z-10 bg-gradient-to-b from-black/80 to-transparent">
-             <div>
-               <h2 className="text-white font-bold text-lg flex items-center gap-2">
-                 <Sparkles className="text-orange-400" size={18} />
-                 AI Studio
-               </h2>
-               <p className="text-stone-400 text-xs mt-1">
-                 {usage.plan} Plan: {usage.limit - usage.editsUsed} edits remaining
-               </p>
-             </div>
-             <button onClick={onClose} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors">
-               <X size={20} />
-             </button>
+            <div>
+              <h2 className="text-white font-bold text-lg flex items-center gap-2">
+                <Sparkles className="text-orange-400" size={18} />
+                AI Studio
+              </h2>
+              <p className="text-stone-400 text-xs mt-1">
+                {usage.plan} Plan: {usage.limit - usage.editsUsed} edits remaining
+              </p>
+            </div>
+            <button onClick={onClose} className="p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors">
+              <X size={20} />
+            </button>
           </div>
 
           <div className="flex-1 flex items-center justify-center p-8 relative">
             {isGenerating ? (
-               <div className="flex flex-col items-center gap-4 text-center">
-                  <div className="relative">
-                    <div className="w-20 h-20 rounded-full border-4 border-stone-800 border-t-orange-500 animate-spin"></div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                       <Sparkles className="text-orange-400 animate-pulse" size={24} />
-                    </div>
+              <div className="flex flex-col items-center gap-4 text-center">
+                <div className="relative">
+                  <div className="w-20 h-20 rounded-full border-4 border-stone-800 border-t-orange-500 animate-spin"></div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Sparkles className="text-orange-400 animate-pulse" size={24} />
                   </div>
-                  <p className="text-stone-300 font-medium animate-pulse">Creating magic...</p>
-                  <p className="text-stone-500 text-sm max-w-xs">This might take a few seconds as we process every pixel.</p>
-               </div>
+                </div>
+                <p className="text-stone-300 font-medium animate-pulse">Creating magic...</p>
+                <p className="text-stone-500 text-sm max-w-xs">This might take a few seconds as we process every pixel.</p>
+              </div>
             ) : resultImage ? (
               <img src={resultImage} alt="Edited Result" className="max-w-full max-h-full object-contain shadow-2xl rounded-lg" />
             ) : (
@@ -138,23 +153,23 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
 
           {/* Compare Toggle (Only if result exists) */}
           {resultImage && !isGenerating && (
-             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4">
-                <button 
-                  onMouseDown={() => setResultImage(null)} 
-                  onMouseUp={() => handleGenerate()} // A simple toggle back for visual check (regenerates not ideal, but keeps simpler state)
-                  className="px-4 py-2 bg-black/60 backdrop-blur-md rounded-full text-white text-sm font-medium border border-white/10 hover:bg-black/80"
-                  onClick={() => setResultImage(null)}
-                >
-                  View Original
-                </button>
-             </div>
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4">
+              <button
+                onMouseDown={() => setResultImage(null)}
+                onMouseUp={() => handleGenerate()} // A simple toggle back for visual check (regenerates not ideal, but keeps simpler state)
+                className="px-4 py-2 bg-black/60 backdrop-blur-md rounded-full text-white text-sm font-medium border border-white/10 hover:bg-black/80"
+                onClick={() => setResultImage(null)}
+              >
+                View Original
+              </button>
+            </div>
           )}
         </div>
 
         {/* Right: Controls Sidebar */}
         <div className="w-full md:w-[380px] bg-stone-900 border-l border-stone-800 flex flex-col">
           <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-            
+
             <div className="mb-8">
               <label className="block text-sm font-bold text-stone-300 mb-2">
                 What would you like to change?
@@ -168,20 +183,20 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
             </div>
 
             <div className="mb-8">
-               <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-3">
-                 Quick Enhancements
-               </label>
-               <div className="flex flex-wrap gap-2">
-                 {SUGGESTED_PROMPTS.map((suggestion, i) => (
-                   <button
-                     key={i}
-                     onClick={() => setPrompt(suggestion)}
-                     className="text-left text-xs text-stone-300 bg-stone-800 hover:bg-stone-700 border border-stone-700 px-3 py-2 rounded-lg transition-colors"
-                   >
-                     {suggestion}
-                   </button>
-                 ))}
-               </div>
+              <label className="block text-xs font-bold text-stone-500 uppercase tracking-wider mb-3">
+                Quick Enhancements
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {SUGGESTED_PROMPTS.map((suggestion, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setPrompt(suggestion)}
+                    className="text-left text-xs text-stone-300 bg-stone-800 hover:bg-stone-700 border border-stone-700 px-3 py-2 rounded-lg transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {error && (
@@ -195,40 +210,40 @@ export const EditPhotoModal: React.FC<EditPhotoModalProps> = ({ photo, onClose, 
           {/* Footer Actions */}
           <div className="p-6 border-t border-stone-800 bg-stone-900">
             {resultImage ? (
-               <div className="grid grid-cols-2 gap-3">
-                  <Button 
-                    variant="ghost" 
-                    onClick={() => setResultImage(null)}
-                    disabled={isSaving}
-                    className="text-stone-400 hover:text-white hover:bg-stone-800 border border-stone-700"
-                  >
-                    <RefreshCw size={16} className="mr-2" />
-                    Retry
-                  </Button>
-                  <Button 
-                    onClick={handleSave}
-                    isLoading={isSaving}
-                    className="bg-teal-600 hover:bg-teal-500 text-white"
-                  >
-                    <Check size={18} className="mr-2" />
-                    Save Copy
-                  </Button>
-               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  variant="ghost"
+                  onClick={() => setResultImage(null)}
+                  disabled={isSaving}
+                  className="text-stone-400 hover:text-white hover:bg-stone-800 border border-stone-700"
+                >
+                  <RefreshCw size={16} className="mr-2" />
+                  Retry
+                </Button>
+                <Button
+                  onClick={handleSave}
+                  isLoading={isSaving}
+                  className="bg-teal-600 hover:bg-teal-500 text-white"
+                >
+                  <Check size={18} className="mr-2" />
+                  Save Copy
+                </Button>
+              </div>
             ) : (
-               <Button 
-                 onClick={handleGenerate} 
-                 disabled={!prompt.trim() || isGenerating}
-                 className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-400 hover:to-orange-500 text-white shadow-lg shadow-orange-900/20"
-               >
-                 {isGenerating ? (
-                   "Processing..."
-                 ) : (
-                   <>
-                     <Wand2 size={18} className="mr-2" />
-                     Generate Edit
-                   </>
-                 )}
-               </Button>
+              <Button
+                onClick={handleGenerate}
+                disabled={!prompt.trim() || isGenerating}
+                className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-400 hover:to-orange-500 text-white shadow-lg shadow-orange-900/20"
+              >
+                {isGenerating ? (
+                  "Processing..."
+                ) : (
+                  <>
+                    <Wand2 size={18} className="mr-2" />
+                    Generate Edit
+                  </>
+                )}
+              </Button>
             )}
           </div>
         </div>
